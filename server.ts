@@ -78,6 +78,12 @@ const getTransporter = async () => {
 const initDb = async () => {
   if (!pool) return;
   
+  if (process.env.VERCEL) {
+    // In Vercel, schema migrations are discouraged from running on every request.
+    // Assuming DB is already migrated.
+    return;
+  }
+  
   const queries = [
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -90,15 +96,6 @@ const initDb = async () => {
       verification_token TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );`,
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN DEFAULT false;",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token TEXT;",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT;",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS picture TEXT;",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
-    "ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_author_id_fkey;",
-    "ALTER TABLE users ALTER COLUMN id TYPE TEXT;",
     `CREATE TABLE IF NOT EXISTS posts (
       id SERIAL PRIMARY KEY,
       type TEXT DEFAULT '일반',
@@ -111,10 +108,7 @@ const initDb = async () => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(author_id) REFERENCES users(id)
-    );`,
-    "ALTER TABLE posts ALTER COLUMN author_id TYPE TEXT;",
-    "ALTER TABLE posts ADD COLUMN IF NOT EXISTS attachment_name TEXT;",
-    "ALTER TABLE posts ADD COLUMN IF NOT EXISTS attachment_url TEXT;"
+    );`
   ];
 
   for (const query of queries) {
