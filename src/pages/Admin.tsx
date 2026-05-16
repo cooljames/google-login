@@ -98,10 +98,19 @@ export default function Admin() {
       onConfirm: async () => {
         try {
           const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+          const text = await res.text();
+          
           if (!res.ok) {
-            const data = await res.json();
-            throw new Error(data.error || '삭제 실패');
+            let errorMsg = '삭제 실패';
+            try {
+              if (text) {
+                const data = JSON.parse(text);
+                errorMsg = data.error || errorMsg;
+              }
+            } catch (e) {}
+            throw new Error(errorMsg);
           }
+          
           setUsers(users.filter(u => u.id !== userId));
           setStats(s => ({ ...s, usersCount: s.usersCount - 1 }));
         } catch (e) {

@@ -718,14 +718,21 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) =
   }
 
   try {
+    await initDbPromise;
+    if (!pool) throw new Error('Database pool not initialized');
+
+    console.log(`Admin ${req.user.email} is deleting user ID: ${id}`);
+    
     // 1. 사용자의 게시글 삭제
     await pool.query('DELETE FROM posts WHERE author_id = $1', [id]);
     // 2. 사용자 삭제
-    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    const result = await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    
+    console.log(`Successfully deleted user ${id}. Rows affected: ${result.rowCount}`);
     res.json({ success: true });
   } catch (e) {
     console.error('Failed to delete user:', e);
-    res.status(500).json({ error: '사용자 삭제 실패' });
+    res.status(500).json({ error: '사용자 삭제 실패: ' + (e as Error).message });
   }
 });
 
