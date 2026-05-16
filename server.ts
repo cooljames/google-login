@@ -287,8 +287,8 @@ app.get('/api/auth/url', async (req, res) => {
   }
   const redirectUri = `${origin}/auth/callback`;
 
-  if (!GOOGLE_CLIENT_ID) {
-    return res.status(500).json({ error: 'OAuth is not configured. Please supply GOOGLE_CLIENT_ID.' });
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'OAuth is not fully configured. Please supply both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the environment variables.' });
   }
 
   const state = Buffer.from(JSON.stringify({ redirectUri })).toString('base64');
