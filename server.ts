@@ -151,6 +151,19 @@ function normalizePost(post: any) {
     updatedAt: post.updated_at || post.updatedAt
   };
 }
+
+function decodeFileName(originalname: string): string {
+  // If the string already contains characters outside ISO-8859-1 (like Korean), it's already decoded.
+  const isLatin1Only = !/[^\x00-\xff]/.test(originalname);
+  if (isLatin1Only) {
+    try {
+      return Buffer.from(originalname, 'latin1').toString('utf8');
+    } catch (e) {
+      return originalname;
+    }
+  }
+  return originalname;
+}
 const initDbPromise = initDb().catch(err => {
   console.error('Critical Database initialization failed:', err);
 });
@@ -531,11 +544,12 @@ app.post('/api/posts', requireAuth, upload.single('attachment'), async (req: any
   let attachment_url = null;
   if (req.file) {
     try {
-      const blob = await put(req.file.originalname, req.file.buffer, {
+      const decodedName = decodeFileName(req.file.originalname);
+      const blob = await put(decodedName, req.file.buffer, {
         access: 'public',
         token: process.env.BLOB_READ_WRITE_TOKEN
       });
-      attachment_name = req.file.originalname;
+      attachment_name = decodedName;
       attachment_url = blob.url;
     } catch (e: any) {
       console.error('Failed to upload file to Blob:', e);
@@ -585,11 +599,12 @@ app.put('/api/posts/:id', requireAuth, upload.single('attachment'), async (req: 
     attachment_url = null;
   } else if (req.file) {
     try {
-      const blob = await put(req.file.originalname, req.file.buffer, {
+      const decodedName = decodeFileName(req.file.originalname);
+      const blob = await put(decodedName, req.file.buffer, {
         access: 'public',
         token: process.env.BLOB_READ_WRITE_TOKEN
       });
-      attachment_name = req.file.originalname;
+      attachment_name = decodedName;
       attachment_url = blob.url;
     } catch (e: any) {
       console.error('Failed to upload file to Blob:', e);
