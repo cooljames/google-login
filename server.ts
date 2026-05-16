@@ -394,26 +394,35 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-async function requireAuth(req: any, res: any, next: any) {
-  const customHeaderToken = req.headers.authorization?.split(' ')[1];
-  const token = customHeaderToken || req.cookies.auth_token;
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+const requireAuth = async (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  const cookieToken = req.cookies?.auth_token;
+  const token = authHeader?.split(' ')[1] || cookieToken;
+
+  if (!token) {
+    console.warn(`[Auth] 401 Unauthorized: No token provided for ${req.method} ${req.url}`);
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    if (!pool) return res.status(500).json({ error: 'Database not initialized' });
-    await initDbPromise;
-    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
-    const user = rows[0];
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
+    
+    if (pool) {
+      const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
+      if (rows.length === 0) {
+        console.warn(`[Auth] 401 Unauthorized: User not found for ID ${decoded.userId}`);
+        return res.status(401).json({ error: 'Access denied. User not found.' });
+      }
+      req.user = rows[0];
+    } else {
+      req.user = { id: decoded.userId, email: decoded.email };
     }
-    req.user = user;
     next();
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid token' });
+  } catch (error) {
+    console.error(`[Auth] 401 Unauthorized: Invalid token for ${req.method} ${req.url}`, error);
+    return res.status(401).json({ error: 'Access denied. Invalid token.' });
   }
-}
+};
 
 function requireAdmin(req: any, res: any, next: any) {
   if (req.user?.role !== 'admin') {
