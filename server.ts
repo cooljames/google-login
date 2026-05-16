@@ -436,8 +436,25 @@ function requireAdmin(req: any, res: any, next: any) {
   next();
 }
 
-app.get('/api/me', requireAuth, (req: any, res: any) => {
-  res.json(normalizeUser(req.user));
+app.get('/api/me', async (req: any, res: any) => {
+  const customHeaderToken = req.headers.authorization?.split(' ')[1];
+  const token = customHeaderToken || req.cookies.auth_token;
+  if (!token) return res.json(null);
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    if (!pool) return res.status(500).json({ error: 'Database not initialized' });
+    
+    await initDbPromise;
+    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
+    const user = rows[0];
+    
+    if (!user) return res.json(null);
+    
+    res.json(normalizeUser(user));
+  } catch (err) {
+    res.json(null);
+  }
 });
 
 app.put('/api/me', requireAuth, async (req: any, res: any) => {

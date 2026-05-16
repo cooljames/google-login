@@ -73,11 +73,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       if (event.origin !== window.location.origin) return;
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         if (event.data.token) {
-          try {
-            localStorage.setItem('auth_token', event.data.token);
-          } catch (e) {
-            console.warn('localStorage block in OAUTH:', e);
-          }
+          setToken(event.data.token);
         }
         fetchUser();
       }
