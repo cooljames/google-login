@@ -83,6 +83,27 @@ export default function Admin() {
     });
   };
 
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    setConfirmModal({
+      message: `[${userName}] 사용자를 정말 삭제하시겠습니까?\n작성한 모든 게시글도 함께 삭제됩니다.`,
+      onConfirm: async () => {
+        try {
+          const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error || '삭제 실패');
+          }
+          setUsers(users.filter(u => u.id !== userId));
+          setStats(s => ({ ...s, usersCount: s.usersCount - 1 }));
+        } catch (e) {
+          setErrorModal((e as Error).message);
+        } finally {
+          setConfirmModal(null);
+        }
+      }
+    });
+  };
+
   if (authLoading || !user || user.role !== 'admin') return <div className="p-xl text-center">Loading...</div>;
 
   return (
@@ -91,7 +112,7 @@ export default function Admin() {
       {confirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-md">
           <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-[384px] w-full border border-outline-variant shadow-lg flex flex-col gap-md">
-            <p className="font-body-lg text-on-surface text-center break-keep">{confirmModal.message}</p>
+            <p className="font-body-lg text-on-surface text-center break-keep whitespace-pre-line">{confirmModal.message}</p>
             <div className="flex justify-center gap-sm mt-xs">
               <button onClick={() => setConfirmModal(null)} className="px-md py-sm rounded bg-surface-container hover:bg-surface-variant text-on-surface transition-colors font-label-md shrink-0">취소</button>
               <button onClick={confirmModal.onConfirm} className="px-md py-sm rounded bg-error text-on-error hover:bg-error-container transition-colors font-label-md shrink-0">확인</button>
@@ -204,12 +225,18 @@ export default function Admin() {
                     {u.role.toUpperCase()}
                   </span>
                 </div>
-                <div className="col-span-2 text-center">
+                <div className="col-span-2 text-center flex justify-center gap-sm">
                   <button 
                     onClick={() => handleRoleChange(u.id, u.role)}
-                    className="text-primary hover:underline"
+                    className="text-primary hover:underline text-xs"
                   >
-                    {u.role === 'admin' ? '관리자 해제' : '관리자 지정'}
+                    {u.role === 'admin' ? '해제' : '지정'}
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteUser(u.id, u.name)}
+                    className="text-error hover:underline text-xs"
+                  >
+                    삭제
                   </button>
                 </div>
               </div>

@@ -710,6 +710,25 @@ app.put('/api/admin/users/:id/role', requireAuth, requireAdmin, async (req, res)
   res.json({ success: true });
 });
 
+app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  
+  if (req.user.id === id) {
+    return res.status(400).json({ error: '자기 자신은 삭제할 수 없습니다.' });
+  }
+
+  try {
+    // 1. 사용자의 게시글 삭제
+    await pool.query('DELETE FROM posts WHERE author_id = $1', [id]);
+    // 2. 사용자 삭제
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Failed to delete user:', e);
+    res.status(500).json({ error: '사용자 삭제 실패' });
+  }
+});
+
 /** -----------------------------------------
  * Boot Setup
  * ----------------------------------------- */
