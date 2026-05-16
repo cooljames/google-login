@@ -198,128 +198,86 @@ app.post('/api/auth/register', async (req, res) => {
   await initDbPromise;
   const { email, password, name } = req.body;
   if (!email || !password || !name) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({ error: '모든 필드를 입력해주세요.' });
   }
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    const id = Date.now().toString() + Math.random().toString(36).substring(7);
-    const verificationToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+    const id = 'user_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
     
+    // Check if email already exists (could be a Google user)
+    const { rows: existing } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (existing.length > 0) {
+      if (existing[0].password) {
+        return res.status(400).json({ error: '이미 가입된 이메일입니다.' });
+      } else {
+        // Was a Google user, now setting a password
+        await pool.query(
+          'UPDATE users SET password = $1, name = $2, is_email_verified = true WHERE email = $3',
+          [hashedPassword, name, email]
+        );
+        const token = jwt.sign({ userId: existing[0].id, email }, JWT_SECRET, { expiresIn: '7d' });
+        setAuthCookie(res, token);
+        return res.json({ success: true, token, user: normalizeUser({ ...existing[0], name }) });
+      }
+    }
+
     await pool.query(
       'INSERT INTO users (id, email, name, password, is_email_verified) VALUES ($1, $2, $3, $4, true)',
       [id, email, name, hashedPassword]
     );
 
     const token = jwt.sign({ userId: id, email }, JWT_SECRET, { expiresIn: '7d' });
+    setAuthCookie(res, token);
 
-    // Send email async without waiting or blocking
-    getTransporter().then(transporter => {
-      const origin = req.headers.referer ? new URL(req.headers.referer).origin : (process.env.APP_URL || `http://localhost:${PORT}`);
-      const verifyLink = `${origin}/api/auth/verify?token=${verificationToken}`;
-      
-      transporter.sendMail({
-        from: '"MyApp" <noreply@myapp.com>',
-        to: email,
-        subject: "Welcome to MyApp!",
-        text: `Hello ${name}! Welcome to MyApp!`,
-        html: `<p>Hello ${name}! Welcome to MyApp!</p>`,
-      }).then(info => {
-        console.log("Welcome email sent: %s", info.messageId);
-      }).catch(console.error);
-    }).catch(console.error);
-
-    res.json({ success: true, message: 'Registration successful!', token });
+    res.json({ success: true, message: '가입 성공!', token, user: normalizeUser({ id, email, name }) });
   } catch (error: any) {
-    if (error.code === '23505') { // unique violation in Postgres
-      return res.status(400).json({ error: 'Email already in use' });
-    }
     console.error('Register error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 
-app.get('/api/auth/verify', async (req, res) => {
-  await initDbPromise;
-  const { token } = req.query;
-  if (!token) return res.status(400).send('Invalid token');
-
-  try {
-    const { rows } = await pool.query('SELECT * FROM users WHERE verification_token = $1', [token]);
-    if (rows.length === 0) {
-      return res.status(400).send('Invalid or expired verification token.');
-    }
-
-    await pool.query('UPDATE users SET is_email_verified = true, verification_token = NULL WHERE verification_token = $1', [token]);
-    res.send(`
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <style>
-            body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f4f8; margin: 0; }
-            .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
-            h1 { color: #2d3748; }
-            p { color: #4a5568; margin-bottom: 1.5rem; }
-            a { display: inline-block; background: #4299e1; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; font-weight: bold; }
-            a:hover { background: #3182ce; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h1>이메일 인증 완료</h1>
-            <p>이메일 인증이 성공적으로 완료되었습니다. 이제 로그인할 수 있습니다.</p>
-            <p>자동으로 이동 중...</p>
-            <script>
-              setTimeout(function() {
-                window.location.href = '/auth';
-              }, 2000);
-            </script>
-          </div>
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    console.error('Verify error:', error);
-    res.status(500).send('Error verifying email.');
-  }
-});
+function setAuthCookie(res: any, token: string) {
+  res.cookie('auth_token', token, {
+    secure: true,
+    sameSite: 'none',
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/'
+  });
+}
 
 app.post('/api/auth/login', async (req, res) => {
   await initDbPromise;
   const { email, password } = req.body;
   if (!email || !password) {
-    return res.status(400).json({ error: 'Missing email or password' });
+    return res.status(400).json({ error: '이메일과 비밀번호를 입력해주세요.' });
   }
 
   try {
     const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     const user = rows[0];
+    
     if (!user || !user.password) {
-      return res.status(401).json({ error: 'Invalid email or password' });
-    }
-
-    if (!user.is_email_verified) {
-      return res.status(403).json({ error: 'Please verify your email before logging in.' });
+      return res.status(401).json({ error: '가입되지 않은 이메일이거나 소셜 로그인 계정입니다.' });
     }
 
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: '비밀번호가 일치하지 않습니다.' });
     }
 
     const sessionToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    setAuthCookie(res, sessionToken);
 
-    res.cookie('auth_token', sessionToken, {
-      secure: true,
-      sameSite: 'none',
-      httpOnly: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000
+    res.json({ 
+      success: true, 
+      token: sessionToken, 
+      user: normalizeUser(user) 
     });
-
-    res.json({ success: true, token: sessionToken, user: { id: user.id, email: user.email, name: user.name, picture: user.picture } });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -461,13 +419,7 @@ app.get('/auth/callback', async (req, res) => {
     }
 
     const sessionToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-
-    res.cookie('auth_token', sessionToken, {
-      secure: true,
-      sameSite: 'none',
-      httpOnly: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    setAuthCookie(res, sessionToken);
 
     res.send(`
       <html>
