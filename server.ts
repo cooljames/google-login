@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
@@ -66,7 +67,10 @@ const getTransporter = async () => {
 };
 
 const initDb = async () => {
-  if (!pool) return;
+  if (!pool) {
+    console.error('Database pool is not initialized. Check your DATABASE_URL.');
+    return;
+  }
   
   const queries = [
     `CREATE TABLE IF NOT EXISTS users (
@@ -75,10 +79,11 @@ const initDb = async () => {
       name TEXT,
       picture TEXT,
       role TEXT DEFAULT 'user',
+      password TEXT,
+      is_email_verified BOOLEAN DEFAULT false,
+      verification_token TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );`,
-    "ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_author_id_fkey;",
-    "ALTER TABLE users ALTER COLUMN id TYPE TEXT;",
     `CREATE TABLE IF NOT EXISTS posts (
       id SERIAL PRIMARY KEY,
       type TEXT DEFAULT '일반',
@@ -92,27 +97,28 @@ const initDb = async () => {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(author_id) REFERENCES users(id)
     );`,
-    "ALTER TABLE posts ALTER COLUMN author_id TYPE TEXT;",
-    "ALTER TABLE users ADD COLUMN name TEXT;",
-    "ALTER TABLE users ADD COLUMN picture TEXT;",
-    "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user';",
-    "ALTER TABLE users ADD COLUMN password TEXT;",
-    "ALTER TABLE posts ADD COLUMN attachment_name TEXT;",
-    "ALTER TABLE posts ADD COLUMN attachment_url TEXT;"
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN DEFAULT false;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token TEXT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';",
+    "ALTER TABLE posts ADD COLUMN IF NOT EXISTS attachment_name TEXT;",
+    "ALTER TABLE posts ADD COLUMN IF NOT EXISTS attachment_url TEXT;"
   ];
 
   for (const query of queries) {
     try {
       await pool.query(query);
     } catch (e: any) {
-      if (!e.message.includes('already exists')) {
+      if (!e.message.includes('already exists') && !e.message.includes('already a foreign key')) {
         console.warn(`Query failed: ${query}`, e.message);
       }
     }
   }
 
   try {
-    await pool.query("UPDATE users SET role = 'admin' WHERE email = 'dsayhong@gmail.com'");
+    if (pool) {
+      await pool.query("UPDATE users SET role = 'admin' WHERE email = 'dsayhong@gmail.com'");
+    }
   } catch(e) {}
 };
 const initDbPromise = initDb();
@@ -321,19 +327,27 @@ app.get('/auth/callback', async (req, res) => {
       picture: userInfoData.picture
     };
 
+    let finalUserId = user.id;
     if (pool) {
-      await pool.query(`
-        INSERT INTO users (id, email, name, picture, is_email_verified) 
-        VALUES ($1, $2, $3, $4, true)
-        ON CONFLICT(id) DO UPDATE SET
-          email = EXCLUDED.email,
-          name = EXCLUDED.name,
-          picture = EXCLUDED.picture,
-          is_email_verified = true
-      `, [user.id, user.email, user.name, user.picture]);
+      const { rows: existingUsers } = await pool.query('SELECT * FROM users WHERE email = $1', [user.email]);
+      
+      if (existingUsers.length > 0) {
+        // 기존 이메일 사용자가 있는 경우: 정보를 업데이트하고 기존 ID를 유지
+        finalUserId = existingUsers[0].id;
+        await pool.query(`
+          UPDATE users SET name = $1, picture = $2, is_email_verified = true 
+          WHERE email = $3
+        `, [user.name, user.picture, user.email]);
+      } else {
+        // 완전히 새로운 사용자인 경우: 구글 ID로 삽입
+        await pool.query(`
+          INSERT INTO users (id, email, name, picture, is_email_verified) 
+          VALUES ($1, $2, $3, $4, true)
+        `, [user.id, user.email, user.name, user.picture]);
+      }
     }
 
-    const sessionToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const sessionToken = jwt.sign({ userId: finalUserId, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
 
     res.cookie('auth_token', sessionToken, {
       secure: true,
