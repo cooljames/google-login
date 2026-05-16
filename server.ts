@@ -121,7 +121,9 @@ const initDb = async () => {
     }
   } catch(e) {}
 };
-const initDbPromise = initDb();
+const initDbPromise = initDb().catch(err => {
+  console.error('CRITICAL: Initial database setup failed:', err);
+});
 
 /** -----------------------------------------
  * Authentication API
@@ -255,11 +257,21 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/auth/url', async (req, res) => {
-  await initDbPromise;
+  console.log('Initiating Google OAuth URL request...');
+  try {
+    await initDbPromise;
+    console.log('Database init check passed.');
+  } catch (dbErr) {
+    console.error('Database initialization failed during OAuth URL request:', dbErr);
+  }
+
   const origin = req.query.origin || (req.headers.referer ? new URL(req.headers.referer).origin : (process.env.APP_URL || `http://localhost:${PORT}`));
   const redirectUri = `${origin}/auth/callback`;
+  console.log('Detected origin:', origin);
+  console.log('Generated redirectUri:', redirectUri);
 
   if (!GOOGLE_CLIENT_ID) {
+    console.error('GOOGLE_CLIENT_ID is missing in environment variables.');
     return res.status(500).json({ error: 'OAuth is not configured. Please supply GOOGLE_CLIENT_ID.' });
   }
 
