@@ -537,8 +537,11 @@ app.post('/api/posts', requireAuth, upload.single('attachment'), async (req: any
       });
       attachment_name = req.file.originalname;
       attachment_url = blob.url;
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to upload file to Blob:', e);
+      if (e.message && e.message.includes('private store')) {
+        return res.status(500).json({ error: '첨부파일 업로드 실패: Vercel Blob 저장소가 Private으로 설정되어 있습니다. Public 저장소를 새로 생성하여 토큰을 교체해주세요.' });
+      }
       return res.status(500).json({ error: 'Failed to upload attachment' });
     }
   }
@@ -588,7 +591,11 @@ app.put('/api/posts/:id', requireAuth, upload.single('attachment'), async (req: 
       });
       attachment_name = req.file.originalname;
       attachment_url = blob.url;
-    } catch (e) {
+    } catch (e: any) {
+      console.error('Failed to upload file to Blob:', e);
+      if (e.message && e.message.includes('private store')) {
+        return res.status(500).json({ error: '첨부파일 업로드 실패: Vercel Blob 저장소가 Private으로 설정되어 있습니다. Public 저장소를 새로 생성하여 토큰을 교체해주세요.' });
+      }
       return res.status(500).json({ error: 'Failed to upload attachment' });
     }
   }
