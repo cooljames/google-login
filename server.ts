@@ -170,6 +170,12 @@ const initDbPromise = initDb().catch(err => {
   console.error('Critical Database initialization failed:', err);
 });
 
+// Request logger for debugging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
+
 // Basic health check
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -179,6 +185,10 @@ app.get('/api/health', (req, res) => {
     env: process.env.NODE_ENV,
     vercel: !!process.env.VERCEL
   });
+});
+
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'API is working' });
 });
 
 /** -----------------------------------------
@@ -711,6 +721,7 @@ app.put('/api/admin/users/:id/role', requireAuth, requireAdmin, async (req, res)
 });
 
 app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  console.log('DELETE /api/admin/users/:id HIT!', req.params.id);
   const { id } = req.params;
   
   if (req.user.id === id) {
