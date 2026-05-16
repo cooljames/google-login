@@ -14,12 +14,19 @@ export default function PostDetail() {
 
   useEffect(() => {
     apiFetch(`/api/posts/${id}`)
-      .then(r => r.json())
+      .then(async r => {
+        const text = await r.text();
+        if (!text) return { error: '게시글 데이터가 없습니다.' };
+        return JSON.parse(text);
+      })
       .then(data => {
         if (data.error) throw new Error(data.error);
         setPost(data);
       })
-      .catch(console.error)
+      .catch(err => {
+        console.error('Post fetch error:', err);
+        setErrorModal('게시글을 불러오는데 실패했습니다.');
+      })
       .finally(() => setLoading(false));
   }, [id]);
 

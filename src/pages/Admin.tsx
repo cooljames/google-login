@@ -23,12 +23,18 @@ export default function Admin() {
   useEffect(() => {
     if (user?.role === 'admin') {
       apiFetch('/api/admin/stats')
-        .then(r => r.json())
+        .then(async r => {
+          const text = await r.text();
+          return text ? JSON.parse(text) : { usersCount: 0, postsCount: 0, adminCount: 0 };
+        })
         .then(setStats)
         .catch(console.error);
         
       apiFetch('/api/admin/users')
-        .then(r => r.json())
+        .then(async r => {
+          const text = await r.text();
+          return text ? JSON.parse(text) : [];
+        })
         .then(setUsers)
         .catch(console.error);
     }
@@ -37,7 +43,10 @@ export default function Admin() {
   useEffect(() => {
     if (user?.role === 'admin' && view === 'posts') {
       apiFetch('/api/posts')
-        .then(r => r.json())
+        .then(async r => {
+          const text = await r.text();
+          return text ? JSON.parse(text) : [];
+        })
         .then(setPosts)
         .catch(console.error);
     }

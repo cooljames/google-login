@@ -11,12 +11,18 @@ export default function Board() {
 
   useEffect(() => {
     apiFetch('/api/posts')
-      .then(r => r.json())
+      .then(async r => {
+        const text = await r.text();
+        return text ? JSON.parse(text) : [];
+      })
       .then(data => {
         setPosts(data);
         setLoading(false);
       })
-      .catch(console.error);
+      .catch(err => {
+        console.error('Board fetch error:', err);
+        setLoading(false);
+      });
   }, []);
 
   return (
