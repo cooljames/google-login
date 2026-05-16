@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
@@ -10,6 +9,7 @@ import { put } from '@vercel/blob';
 import bcrypt from 'bcryptjs';
 import nodemailer from 'nodemailer';
 import pg from 'pg';
+const { Pool } = pg;
 
 // File setup
 // __filename and __dirname removed for Vercel compat
@@ -27,15 +27,17 @@ const JWT_SECRET = process.env.JWT_SECRET || 'DEV_SECRET_KEY_CHANGE_IN_PROD';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 
+// Global pool instance
 let pool: pg.Pool;
 
 if (process.env.DATABASE_URL) {
-  pool = new pg.Pool({
+  console.log('Database URL detected, initializing pool...');
+  pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
   });
 } else {
-  console.warn('DATABASE_URL is not set. Please provide Neon connection string.');
+  console.error('DATABASE_URL is not set. Database operations will fail.');
 }
 
 const getTransporter = async () => {
@@ -67,10 +69,7 @@ const getTransporter = async () => {
 };
 
 const initDb = async () => {
-  if (!pool) {
-    console.error('Database pool is not initialized. Check your DATABASE_URL.');
-    return;
-  }
+  if (!pool) return;
   
   const queries = [
     `CREATE TABLE IF NOT EXISTS users (
@@ -78,12 +77,21 @@ const initDb = async () => {
       email TEXT UNIQUE,
       name TEXT,
       picture TEXT,
-      role TEXT DEFAULT 'user',
       password TEXT,
+      role TEXT DEFAULT 'user',
       is_email_verified BOOLEAN DEFAULT false,
       verification_token TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );`,
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN DEFAULT false;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token TEXT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS picture TEXT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
+    "ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_author_id_fkey;",
+    "ALTER TABLE users ALTER COLUMN id TYPE TEXT;",
     `CREATE TABLE IF NOT EXISTS posts (
       id SERIAL PRIMARY KEY,
       type TEXT DEFAULT '일반',
@@ -97,10 +105,7 @@ const initDb = async () => {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(author_id) REFERENCES users(id)
     );`,
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT;",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN DEFAULT false;",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token TEXT;",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';",
+    "ALTER TABLE posts ALTER COLUMN author_id TYPE TEXT;",
     "ALTER TABLE posts ADD COLUMN IF NOT EXISTS attachment_name TEXT;",
     "ALTER TABLE posts ADD COLUMN IF NOT EXISTS attachment_url TEXT;"
   ];
@@ -109,20 +114,70 @@ const initDb = async () => {
     try {
       await pool.query(query);
     } catch (e: any) {
-      if (!e.message.includes('already exists') && !e.message.includes('already a foreign key')) {
+      if (!e.message.includes('already exists')) {
         console.warn(`Query failed: ${query}`, e.message);
       }
     }
   }
 
   try {
-    if (pool) {
-      await pool.query("UPDATE users SET role = 'admin' WHERE email = 'dsayhong@gmail.com'");
+    const adminEmail = 'dsayhong@gmail.com';
+    const { rows: adminRows } = await pool.query('SELECT * FROM users WHERE email = $1', [adminEmail]);
+    if (adminRows.length > 0) {
+      const user = adminRows[0];
+      // If password is not hashed (bcrypt hashes start with $2), hash it.
+      if (user.password && !user.password.startsWith('$2')) {
+        const hash = await bcrypt.hash(user.password, 10);
+        await pool.query('UPDATE users SET password = $1, role = $2 WHERE email = $3', [hash, 'admin', adminEmail]);
+      } else {
+        await pool.query("UPDATE users SET role = 'admin' WHERE email = $1", [adminEmail]);
+      }
     }
   } catch(e) {}
 };
+
+function normalizeUser(user: any) {
+  if (!user) return null;
+  return {
+    id: user.id || user.uid,
+    email: user.email,
+    name: user.name || user.displayName || user.email.split('@')[0],
+    picture: user.picture || user.photoURL,
+    role: user.role || 'user',
+    isEmailVerified: user.is_email_verified || user.isEmailVerified,
+    createdAt: user.created_at || user.createdAt
+  };
+}
+
+function normalizePost(post: any) {
+  if (!post) return null;
+  return {
+    id: post.id,
+    title: post.title,
+    content: post.content,
+    type: post.type,
+    author: post.author || post.author_name || '알 수 없음',
+    authorId: post.author_id,
+    views: post.views,
+    attachmentName: post.attachment_name,
+    attachmentUrl: post.attachment_url,
+    createdAt: post.created_at || post.createdAt,
+    updatedAt: post.updated_at || post.updatedAt
+  };
+}
 const initDbPromise = initDb().catch(err => {
-  console.error('CRITICAL: Initial database setup failed:', err);
+  console.error('Critical Database initialization failed:', err);
+});
+
+// Basic health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    db: !!pool, 
+    googleConfig: !!GOOGLE_CLIENT_ID,
+    env: process.env.NODE_ENV,
+    vercel: !!process.env.VERCEL
+  });
 });
 
 /** -----------------------------------------
@@ -141,25 +196,26 @@ app.post('/api/auth/register', async (req, res) => {
     const verificationToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
     
     await pool.query(
-      'INSERT INTO users (id, email, name, password, is_email_verified, verification_token) VALUES ($1, $2, $3, $4, true, $5)',
-      [id, email, name, hashedPassword, verificationToken]
+      'INSERT INTO users (id, email, name, password, is_email_verified) VALUES ($1, $2, $3, $4, true)',
+      [id, email, name, hashedPassword]
     );
 
-    const token = jwt.sign({ userId: id, email }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+    const token = jwt.sign({ userId: id, email }, JWT_SECRET, { expiresIn: '7d' });
 
     // Send email async without waiting or blocking
-    const transporter = await getTransporter();
-    const origin = req.headers.referer ? new URL(req.headers.referer).origin : (process.env.APP_URL || `http://localhost:${PORT}`);
-    const verifyLink = `${origin}/api/auth/verify?token=${verificationToken}`;
-    
-    transporter.sendMail({
-      from: '"MyApp" <noreply@myapp.com>',
-      to: email,
-      subject: "Welcome to MyApp!",
-      text: `Hello ${name}! Welcome to MyApp!`,
-      html: `<p>Hello ${name}! Welcome to MyApp!</p>`,
-    }).then(info => {
-      console.log("Welcome email sent: %s", info.messageId);
+    getTransporter().then(transporter => {
+      const origin = req.headers.referer ? new URL(req.headers.referer).origin : (process.env.APP_URL || `http://localhost:${PORT}`);
+      const verifyLink = `${origin}/api/auth/verify?token=${verificationToken}`;
+      
+      transporter.sendMail({
+        from: '"MyApp" <noreply@myapp.com>',
+        to: email,
+        subject: "Welcome to MyApp!",
+        text: `Hello ${name}! Welcome to MyApp!`,
+        html: `<p>Hello ${name}! Welcome to MyApp!</p>`,
+      }).then(info => {
+        console.log("Welcome email sent: %s", info.messageId);
+      }).catch(console.error);
     }).catch(console.error);
 
     res.json({ success: true, message: 'Registration successful!', token });
@@ -257,21 +313,22 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/auth/url', async (req, res) => {
-  console.log('Initiating Google OAuth URL request...');
-  try {
-    await initDbPromise;
-    console.log('Database init check passed.');
-  } catch (dbErr) {
-    console.error('Database initialization failed during OAuth URL request:', dbErr);
+  await initDbPromise;
+  let origin = req.query.origin as string;
+  if (!origin) {
+    if (req.headers.referer) {
+      try {
+        origin = new URL(req.headers.referer).origin;
+      } catch (e) {
+        origin = process.env.APP_URL || `http://localhost:${PORT}`;
+      }
+    } else {
+      origin = process.env.APP_URL || `http://localhost:${PORT}`;
+    }
   }
-
-  const origin = req.query.origin || (req.headers.referer ? new URL(req.headers.referer).origin : (process.env.APP_URL || `http://localhost:${PORT}`));
   const redirectUri = `${origin}/auth/callback`;
-  console.log('Detected origin:', origin);
-  console.log('Generated redirectUri:', redirectUri);
 
   if (!GOOGLE_CLIENT_ID) {
-    console.error('GOOGLE_CLIENT_ID is missing in environment variables.');
     return res.status(500).json({ error: 'OAuth is not configured. Please supply GOOGLE_CLIENT_ID.' });
   }
 
@@ -339,19 +396,19 @@ app.get('/auth/callback', async (req, res) => {
       picture: userInfoData.picture
     };
 
-    let finalUserId = user.id;
     if (pool) {
-      const { rows: existingUsers } = await pool.query('SELECT * FROM users WHERE email = $1', [user.email]);
-      
-      if (existingUsers.length > 0) {
-        // 기존 이메일 사용자가 있는 경우: 정보를 업데이트하고 기존 ID를 유지
-        finalUserId = existingUsers[0].id;
+      const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [user.email]);
+      if (rows.length > 0) {
+        // User with this email already exists, link the account by updating it
+        user.id = rows[0].id;
         await pool.query(`
-          UPDATE users SET name = $1, picture = $2, is_email_verified = true 
-          WHERE email = $3
-        `, [user.name, user.picture, user.email]);
+          UPDATE users SET 
+            name = COALESCE($1, name), 
+            picture = COALESCE($2, picture), 
+            is_email_verified = true 
+          WHERE id = $3
+        `, [user.name, user.picture, user.id]);
       } else {
-        // 완전히 새로운 사용자인 경우: 구글 ID로 삽입
         await pool.query(`
           INSERT INTO users (id, email, name, picture, is_email_verified) 
           VALUES ($1, $2, $3, $4, true)
@@ -359,7 +416,7 @@ app.get('/auth/callback', async (req, res) => {
       }
     }
 
-    const sessionToken = jwt.sign({ userId: finalUserId, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const sessionToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
 
     res.cookie('auth_token', sessionToken, {
       secure: true,
@@ -370,6 +427,9 @@ app.get('/auth/callback', async (req, res) => {
 
     res.send(`
       <html>
+        <head>
+          <meta charset="utf-8" />
+        </head>
         <body>
           <script>
             try {
@@ -379,7 +439,7 @@ app.get('/auth/callback', async (req, res) => {
             }
             if (window.opener) {
               window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${sessionToken}' }, '*');
-              window.close();
+              setTimeout(() => { if (window.close) window.close(); }, 100);
             } else {
               window.location.href = '/board?token=${sessionToken}';
             }
@@ -394,35 +454,31 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-const requireAuth = async (req: any, res: any, next: any) => {
-  const authHeader = req.headers.authorization;
-  const cookieToken = req.cookies?.auth_token;
-  const token = authHeader?.split(' ')[1] || cookieToken;
-
-  if (!token) {
-    console.warn(`[Auth] 401 Unauthorized: No token provided for ${req.method} ${req.url}`);
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
-  }
+async function requireAuth(req: any, res: any, next: any) {
+  const customHeaderToken = req.headers.authorization?.split(' ')[1];
+  const token = customHeaderToken || req.cookies.auth_token;
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
-    
-    if (pool) {
-      const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
-      if (rows.length === 0) {
-        console.warn(`[Auth] 401 Unauthorized: User not found for ID ${decoded.userId}`);
-        return res.status(401).json({ error: 'Access denied. User not found.' });
-      }
-      req.user = rows[0];
-    } else {
-      req.user = { id: decoded.userId, email: decoded.email };
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    if (!pool) {
+      console.error('requireAuth: Database pool not initialized');
+      return res.status(500).json({ error: 'Database not initialized' });
     }
+    await initDbPromise;
+    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
+    const user = rows[0];
+    if (!user) {
+      console.warn(`requireAuth: User not found for ID ${decoded.userId}`);
+      return res.status(401).json({ error: 'User not found' });
+    }
+    req.user = user;
     next();
-  } catch (error) {
-    console.error(`[Auth] 401 Unauthorized: Invalid token for ${req.method} ${req.url}`, error);
-    return res.status(401).json({ error: 'Access denied. Invalid token.' });
+  } catch (err) {
+    console.error('requireAuth: Token verification failed', err);
+    res.status(401).json({ error: 'Invalid token' });
   }
-};
+}
 
 function requireAdmin(req: any, res: any, next: any) {
   if (req.user?.role !== 'admin') {
@@ -432,7 +488,7 @@ function requireAdmin(req: any, res: any, next: any) {
 }
 
 app.get('/api/me', requireAuth, (req: any, res: any) => {
-  res.json(req.user);
+  res.json(normalizeUser(req.user));
 });
 
 app.put('/api/me', requireAuth, async (req: any, res: any) => {
@@ -442,7 +498,7 @@ app.put('/api/me', requireAuth, async (req: any, res: any) => {
   if (!pool) return res.status(500).json({ error: 'Database not initialized' });
   await pool.query('UPDATE users SET name = $1 WHERE id = $2', [name, req.user.id]);
   const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
-  res.json(rows[0]);
+  res.json(normalizeUser(rows[0]));
 });
 
 app.post('/api/logout', (req, res) => {
@@ -461,12 +517,12 @@ app.get('/api/posts', async (req, res) => {
   await initDbPromise;
   if (!pool) return res.status(500).json({ error: 'Database not initialized' });
   const { rows } = await pool.query(`
-    SELECT p.*, u.name as author 
+    SELECT p.*, u.name as author_name, u.picture as author_picture
     FROM posts p 
     LEFT JOIN users u ON p.author_id = u.id 
     ORDER BY p.id DESC
   `);
-  res.json(rows);
+  res.json(rows.map(normalizePost));
 });
 
 app.get('/api/posts/:id', async (req, res) => {
@@ -476,14 +532,14 @@ app.get('/api/posts/:id', async (req, res) => {
   try {
     await pool.query('UPDATE posts SET views = views + 1 WHERE id = $1', [id]);
     const { rows } = await pool.query(`
-      SELECT p.*, u.name as author 
+      SELECT p.*, u.name as author_name
       FROM posts p 
       LEFT JOIN users u ON p.author_id = u.id 
       WHERE p.id = $1
     `, [id]);
     
     if (rows.length === 0) return res.status(404).json({ error: 'Post not found' });
-    res.json(rows[0]);
+    res.json(normalizePost(rows[0]));
   } catch (err) {
     res.status(500).json({ error: 'Failed to find post' });
   }
@@ -518,13 +574,13 @@ app.post('/api/posts', requireAuth, upload.single('attachment'), async (req: any
   const newPostId = result.rows[0].id;
   
   const { rows } = await pool.query(`
-    SELECT p.*, u.name as author 
+    SELECT p.*, u.name as author_name
     FROM posts p 
     LEFT JOIN users u ON p.author_id = u.id 
     WHERE p.id = $1
   `, [newPostId]);
   
-  res.json(rows[0]);
+  res.json(normalizePost(rows[0]));
 });
 
 app.put('/api/posts/:id', requireAuth, upload.single('attachment'), async (req: any, res: any) => {
@@ -567,13 +623,13 @@ app.put('/api/posts/:id', requireAuth, upload.single('attachment'), async (req: 
   );
   
   const { rows: updatedRows } = await pool.query(`
-    SELECT p.*, u.name as author 
+    SELECT p.*, u.name as author_name
     FROM posts p 
     LEFT JOIN users u ON p.author_id = u.id 
     WHERE p.id = $1
   `, [id]);
   
-  res.json(updatedRows[0]);
+  res.json(normalizePost(updatedRows[0]));
 });
 
 app.delete('/api/posts/:id', requireAuth, async (req: any, res: any) => {
@@ -608,7 +664,7 @@ app.get('/api/admin/stats', requireAuth, requireAdmin, async (req, res) => {
 
 app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM users ORDER BY created_at DESC');
-  res.json(rows);
+  res.json(rows.map(normalizeUser));
 });
 
 app.put('/api/admin/users/:id/role', requireAuth, requireAdmin, async (req, res) => {

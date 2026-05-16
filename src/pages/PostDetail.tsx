@@ -38,7 +38,7 @@ export default function PostDetail() {
   if (loading) return <div className="p-xl text-center">로딩 중...</div>;
   if (!post) return <div className="p-xl text-center">게시글을 찾을 수 없습니다.</div>;
 
-  const isAuthorOrAdmin = user && (user.id === post.author_id || user.role === 'admin');
+  const isAuthorOrAdmin = user && (user.id === post.authorId || user.role === 'admin');
 
   return (
     <main className="flex-grow w-full max-w-[1000px] mx-auto px-margin-mobile md:px-margin-desktop py-lg">
@@ -79,7 +79,7 @@ export default function PostDetail() {
           <div className="flex items-center gap-md font-body-sm text-on-surface-variant">
             <span>작성자: {post.author || '알 수 없음'}</span>
             <span>조회수: {post.views}</span>
-            <span>작성일: {new Date(post.created_at).toLocaleString()}</span>
+            <span>작성일: {post.createdAt ? new Date(post.createdAt).toLocaleString() : '-'}</span>
           </div>
         </header>
 
@@ -87,21 +87,21 @@ export default function PostDetail() {
           {post.content || '내용이 없습니다.'}
         </section>
 
-        {post.attachment_name && post.attachment_url && (
+        {post.attachmentName && post.attachmentUrl && (
           <section className="mt-md border border-outline-variant bg-surface-container-lowest rounded p-md">
             <h3 className="font-label-md text-on-surface-variant flex items-center gap-xs mb-sm">
               <span className="material-symbols-outlined text-[18px]">attach_file</span>
               첨부파일
             </h3>
             <a 
-              href={post.attachment_url} 
-              download={post.attachment_name}
+              href={post.attachmentUrl} 
+              download={post.attachmentName}
               target="_blank" 
               rel="noopener noreferrer"
               className="inline-flex items-center gap-xs font-body-sm text-primary hover:underline"
             >
               <span className="material-symbols-outlined text-[16px]">download</span>
-              {post.attachment_name}
+              {post.attachmentName}
             </a>
           </section>
         )}

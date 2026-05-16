@@ -62,7 +62,7 @@ export default function Board() {
                   <span className="bg-surface-container text-on-surface-variant font-label-sm text-label-sm px-2 py-1 rounded w-fit">{post.type}</span>
                 )}
                 <Link to={`/board/${post.id}`} className="font-body-md text-body-md text-on-surface hover:text-primary transition-colors line-clamp-1">{post.title}</Link>
-                {post.attachment_name && <span className="material-symbols-outlined text-[16px] text-outline" title="첨부파일 있음">attachment</span>}
+                {post.attachmentName && <span className="material-symbols-outlined text-[16px] text-outline" title="첨부파일 있음">attachment</span>}
               </div>
               <div className="col-span-1 md:col-span-2 flex justify-between md:justify-center items-center mt-xs md:mt-0 font-body-sm text-body-sm text-on-surface-variant">
                 <span className="md:hidden">작성자: </span>
@@ -70,7 +70,7 @@ export default function Board() {
               </div>
               <div className="col-span-1 md:col-span-2 flex justify-between md:justify-center items-center font-body-sm text-body-sm text-on-surface-variant">
                 <span className="md:hidden">작성일: </span>
-                {post.createdAt}
+                {post.createdAt ? new Date(post.createdAt).toLocaleDateString() : '-'}
               </div>
             </div>
           ))}

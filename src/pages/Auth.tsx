@@ -41,8 +41,7 @@ export default function Auth() {
     } else {
       const result = await registerWithEmail(email, password, name);
       if (result && result.includes('Registration successful')) {
-        setMessage(result);
-        setIsLogin(true);
+        navigate('/board');
       } else if (result) {
         setError(result);
       } else {
