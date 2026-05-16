@@ -87,34 +87,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const h = 600;
       const left = window.screen.width / 2 - w / 2;
       const top = window.screen.height / 2 - h / 2;
-      const authWindow = window.open('', 'oauth_popup', `width=${w},height=${h},top=${top},left=${left}`);
+      const url = `/api/auth/google/redirect?origin=${encodeURIComponent(window.location.origin)}`;
+      const authWindow = window.open(url, 'oauth_popup', `width=${w},height=${h},top=${top},left=${left}`);
       
       if (!authWindow) {
-        return '팝업이 차단되었습니다. 브라우저 설정에서 팝업 차단을 해제해주세요.';
+        return '팝업이 차단되었습니다. 앱을 새 탭에서 열거나 팝업 차단을 해제해주세요.';
       }
 
-      authWindow.document.write('로딩 중...');
-
-      const res = await apiFetch(`/api/auth/url?origin=${encodeURIComponent(window.location.origin)}`);
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        authWindow.close();
-        return `Server error (URL): ${text.substring(0, 100)}`;
-      }
-      
-      if (!res.ok) {
-        authWindow.close();
-        return data.error || 'Set up Google Client ID / Secret first.';
-      }
-      if (!data.url) {
-        authWindow.close();
-        return 'Set up Google Client ID / Secret first.';
-      }
-      
-      authWindow.location.href = data.url;
       return null;
     } catch (e) {
       console.error('Error fetching OAuth URL:', e);

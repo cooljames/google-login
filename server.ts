@@ -312,6 +312,39 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+app.get('/api/auth/google/redirect', async (req, res) => {
+  let origin = req.query.origin as string;
+  if (!origin) {
+    if (req.headers.referer) {
+      try {
+        origin = new URL(req.headers.referer).origin;
+      } catch (e) {
+        origin = process.env.APP_URL || `http://localhost:${PORT}`;
+      }
+    } else {
+      origin = process.env.APP_URL || `http://localhost:${PORT}`;
+    }
+  }
+  const redirectUri = `${origin}/auth/callback`;
+
+  if (!GOOGLE_CLIENT_ID) {
+    return res.status(500).send('OAuth is not configured. Please supply GOOGLE_CLIENT_ID.');
+  }
+
+  const state = Buffer.from(JSON.stringify({ redirectUri })).toString('base64');
+
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile',
+    prompt: 'select_account',
+    state
+  });
+
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+});
+
 app.get('/api/auth/url', async (req, res) => {
   await initDbPromise;
   let origin = req.query.origin as string;
