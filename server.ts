@@ -266,8 +266,15 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/auth/url', async (req, res) => {
   await initDbPromise;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] || 'http';
   let origin = req.query.origin as string;
-  if (!origin) {
+  
+  // Always use the real host if available, as it's the most reliable source of truth
+  // and prevents Vercel rewrite issues from falling back to localhost.
+  if (host) {
+    origin = `${proto}://${host}`;
+  } else if (!origin) {
     if (req.headers.referer) {
       try {
         origin = new URL(req.headers.referer).origin;
@@ -307,9 +314,12 @@ app.get('/auth/callback', async (req, res) => {
   }
 
   // Always derive redirectUri from state (set during /api/auth/url)
-  // Fallback to APP_URL env var to ensure consistency with Google's registered URIs
+  // Use host header as the absolute source of truth for targetOrigin fallback
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  
   let redirectUri = '';
-  let targetOrigin = process.env.APP_URL || `http://localhost:${PORT}`;
+  let targetOrigin = host ? `${proto}://${host}` : (process.env.APP_URL || `http://localhost:${PORT}`);
   try {
     if (state) {
       const decodedState = JSON.parse(Buffer.from(state as string, 'base64').toString());
