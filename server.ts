@@ -34,7 +34,14 @@ if (process.env.DATABASE_URL) {
   console.log('Database URL detected, initializing pool...');
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 500, // aggressive idle timeout for serverless
+    max: 10
+  });
+  
+  pool.on('error', (err) => {
+    console.error('Unexpected error on idle database client', err);
   });
 } else {
   console.error('DATABASE_URL is not set. Database operations will fail.');

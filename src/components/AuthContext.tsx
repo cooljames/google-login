@@ -83,20 +83,11 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGoogle = async (): Promise<string | null> => {
     try {
-      const w = 500;
-      const h = 600;
-      const left = window.screen.width / 2 - w / 2;
-      const top = window.screen.height / 2 - h / 2;
       const url = `/api/auth/google/redirect?origin=${encodeURIComponent(window.location.origin)}`;
-      const authWindow = window.open(url, 'oauth_popup', `width=${w},height=${h},top=${top},left=${left}`);
-      
-      if (!authWindow) {
-        return '팝업이 차단되었습니다. 앱을 새 탭에서 열거나 팝업 차단을 해제해주세요.';
-      }
-
+      window.location.href = url;
       return null;
     } catch (e) {
-      console.error('Error fetching OAuth URL:', e);
+      console.error('Error initiating Google Login:', e);
       return 'Error initiating Google Login';
     }
   };
