@@ -480,12 +480,28 @@ app.get('/api/me', async (req: any, res: any) => {
   }
 });
 
-app.put('/api/me', requireAuth, async (req: any, res: any) => {
+app.put('/api/me', requireAuth, upload.single('picture'), async (req: any, res: any) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required' });
   
   if (!pool) return res.status(500).json({ error: 'Database not initialized' });
-  await pool.query('UPDATE users SET name = $1 WHERE id = $2', [name, req.user.id]);
+
+  let picture = req.user.picture;
+  if (req.file) {
+    try {
+      const decodedName = decodeFileName(req.file.originalname);
+      const blob = await put(decodedName, req.file.buffer, {
+        access: 'public',
+        token: process.env.BLOB_READ_WRITE_TOKEN
+      });
+      picture = blob.url;
+    } catch (e) {
+      console.error('Failed to upload profile picture to Blob:', e);
+      return res.status(500).json({ error: 'Failed to upload profile picture' });
+    }
+  }
+
+  await pool.query('UPDATE users SET name = $1, picture = $2 WHERE id = $3', [name, picture, req.user.id]);
   const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
   res.json(normalizeUser(rows[0]));
 });

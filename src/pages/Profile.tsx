@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../components/AuthContext';
 import { apiFetch } from '../lib/api';
 
@@ -7,6 +7,33 @@ export default function Profile() {
   const [name, setName] = useState(user?.name || '');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setMessage({ type: 'error', text: '이미지 크기는 최대 5MB입니다.' });
+        return;
+      }
+      setImageFile(file);
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    }
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
+  };
 
   if (!user) {
     return (
@@ -26,12 +53,24 @@ export default function Profile() {
     setLoading(true);
     setMessage({ type: '', text: '' });
     try {
+      const formData = new FormData();
+      formData.append('name', name);
+      if (imageFile) {
+        formData.append('picture', imageFile);
+      }
+
       const res = await apiFetch('/api/me', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
+        body: formData
       });
-      if (!res.ok) throw new Error('수정에 실패했습니다.');
+      if (!res.ok) {
+        const errorText = await res.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (err) {}
+        throw new Error(errorData?.error || '수정에 실패했습니다.');
+      }
       setMessage({ type: 'success', text: '프로필이 업데이트되었습니다. 새로고침을 해주세요.' });
       setTimeout(() => window.location.reload(), 1500);
     } catch (e) {
@@ -62,11 +101,22 @@ export default function Profile() {
                 <img 
                   alt="Current profile picture" 
                   className="w-full h-full object-cover" 
-                  src={user.picture || 'https://via.placeholder.com/96'} 
+                  src={previewUrl || user.picture || 'https://via.placeholder.com/96'} 
                 />
               </div>
               <div className="flex flex-col gap-xs">
-                <button className="font-label-md text-label-md text-on-surface bg-surface-container-lowest border border-outline-variant px-[20px] py-[10px] rounded hover:bg-surface-container-low transition-colors w-fit" type="button">
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleImageChange} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
+                <button 
+                  className="font-label-md text-label-md text-on-surface bg-surface-container-lowest border border-outline-variant px-[20px] py-[10px] rounded hover:bg-surface-container-low transition-colors w-fit" 
+                  type="button"
+                  onClick={triggerFileInput}
+                >
                   이미지 변경
                 </button>
                 <p className="font-body-sm text-body-sm text-on-surface-variant">JPG, GIF 또는 PNG. 최대 5MB.</p>
