@@ -68,12 +68,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
     fetchUser();
 
-    // Listen for popup messages
+    // Listen for popup OAuth messages — only accept from same origin
     const handleMessage = (event: MessageEvent) => {
-      const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost') && origin !== window.location.origin) {
-        return;
-      }
+      if (event.origin !== window.location.origin) return;
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         if (event.data.token) {
           try {

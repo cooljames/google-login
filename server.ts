@@ -4,7 +4,6 @@ import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import path from 'path';
 
-import fs from 'fs';
 import multer from 'multer';
 import { put } from '@vercel/blob';
 import bcrypt from 'bcryptjs';
@@ -121,21 +120,6 @@ const initDb = async () => {
       }
     }
   }
-
-  try {
-    const adminEmail = 'dsayhong@gmail.com';
-    const { rows: adminRows } = await pool.query('SELECT * FROM users WHERE email = $1', [adminEmail]);
-    if (adminRows.length > 0) {
-      const user = adminRows[0];
-      // If password is not hashed (bcrypt hashes start with $2), hash it.
-      if (user.password && !user.password.startsWith('$2')) {
-        const hash = await bcrypt.hash(user.password, 10);
-        await pool.query('UPDATE users SET password = $1, role = $2 WHERE email = $3', [hash, 'admin', adminEmail]);
-      } else {
-        await pool.query("UPDATE users SET role = 'admin' WHERE email = $1", [adminEmail]);
-      }
-    }
-  } catch(e) {}
 };
 
 function normalizeUser(user: any) {
@@ -171,11 +155,13 @@ const initDbPromise = initDb().catch(err => {
   console.error('Critical Database initialization failed:', err);
 });
 
-// Request logger for debugging
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-  next();
-});
+// Request logger (development only)
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+  });
+}
 
 // Basic health check
 app.get('/api/health', (req, res) => {
@@ -186,10 +172,6 @@ app.get('/api/health', (req, res) => {
     env: process.env.NODE_ENV,
     vercel: !!process.env.VERCEL
   });
-});
-
-app.get('/api/test', (req, res) => {
-  res.json({ message: 'API is working' });
 });
 
 /** -----------------------------------------
@@ -282,39 +264,6 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.get('/api/auth/google/redirect', async (req, res) => {
-  let origin = req.query.origin as string;
-  if (!origin) {
-    if (req.headers.referer) {
-      try {
-        origin = new URL(req.headers.referer).origin;
-      } catch (e) {
-        origin = process.env.APP_URL || `http://localhost:${PORT}`;
-      }
-    } else {
-      origin = process.env.APP_URL || `http://localhost:${PORT}`;
-    }
-  }
-  const redirectUri = `${origin}/auth/callback`;
-
-  if (!GOOGLE_CLIENT_ID) {
-    return res.status(500).send('OAuth is not configured. Please supply GOOGLE_CLIENT_ID.');
-  }
-
-  const state = Buffer.from(JSON.stringify({ redirectUri })).toString('base64');
-
-  const params = new URLSearchParams({
-    client_id: GOOGLE_CLIENT_ID,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope: 'openid email profile',
-    prompt: 'select_account',
-    state
-  });
-
-  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
-});
-
 app.get('/api/auth/url', async (req, res) => {
   await initDbPromise;
   let origin = req.query.origin as string;
@@ -357,21 +306,24 @@ app.get('/auth/callback', async (req, res) => {
     return res.send(`<html><body><p>No code provided.</p></body></html>`);
   }
 
+  // Always derive redirectUri from state (set during /api/auth/url)
+  // Fallback to APP_URL env var to ensure consistency with Google's registered URIs
   let redirectUri = '';
+  let targetOrigin = process.env.APP_URL || `http://localhost:${PORT}`;
   try {
     if (state) {
       const decodedState = JSON.parse(Buffer.from(state as string, 'base64').toString());
       redirectUri = decodedState.redirectUri;
+      if (redirectUri) {
+        targetOrigin = new URL(redirectUri).origin;
+      }
     }
   } catch (e) {
     console.error('Failed to parse state:', e);
   }
 
   if (!redirectUri) {
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    const proto = req.headers['x-forwarded-proto'] || 'http';
-    const origin = host?.includes('localhost') ? `http://${host}` : `${proto}://${host}`;
-    redirectUri = `${origin}/auth/callback`;
+    redirectUri = `${targetOrigin}/auth/callback`;
   }
 
   try {
@@ -402,7 +354,6 @@ app.get('/auth/callback', async (req, res) => {
     if (pool) {
       const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [user.email]);
       if (rows.length > 0) {
-        // User with this email already exists, link the account by updating it
         user.id = rows[0].id;
         await pool.query(`
           UPDATE users SET 
@@ -422,23 +373,24 @@ app.get('/auth/callback', async (req, res) => {
     const sessionToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     setAuthCookie(res, sessionToken);
 
+    // Use targetOrigin for postMessage (never '*') to prevent token leakage
     res.send(`
       <html>
-        <head>
-          <meta charset="utf-8" />
-        </head>
+        <head><meta charset="utf-8" /></head>
         <body>
           <script>
+            var targetOrigin = ${JSON.stringify(targetOrigin)};
             try {
-              localStorage.setItem('auth_token', '${sessionToken}');
+              localStorage.setItem('auth_token', ${JSON.stringify(sessionToken)});
             } catch (e) {
               console.warn('localStorage block in callback:', e);
             }
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${sessionToken}' }, '*');
-              setTimeout(() => { if (window.close) window.close(); }, 100);
+              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: ${JSON.stringify(sessionToken)} }, targetOrigin);
+              setTimeout(function() { window.close(); }, 300);
             } else {
-              window.location.href = '/board?token=${sessionToken}';
+              // Cookie is already set; no token needed in URL
+              window.location.href = '/board';
             }
           </script>
           <p>로그인 성공했습니다. 이동 중...</p>
@@ -673,7 +625,7 @@ app.put('/api/admin/users/:id/role', requireAuth, requireAdmin, async (req, res)
   res.json({ success: true });
 });
 
-app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req: any, res: any) => {
   console.log('DELETE /api/admin/users/:id HIT!', req.params.id);
   const { id } = req.params;
   
