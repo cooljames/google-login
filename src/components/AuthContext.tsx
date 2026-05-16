@@ -37,11 +37,17 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await apiFetch('/api/me');
       if (res.ok) {
-        setUser(await res.json());
+        const text = await res.text();
+        if (text) {
+          setUser(JSON.parse(text));
+        } else {
+          setUser(null);
+        }
       } else {
         setUser(null);
       }
     } catch (err) {
+      console.error('fetchUser error:', err);
       setUser(null);
     } finally {
       setLoading(false);
@@ -53,7 +59,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     const urlParams = new URLSearchParams(window.location.search);
     const urlToken = urlParams.get('token');
     if (urlToken) {
-      setToken(urlToken);
+      try {
+        localStorage.setItem('auth_token', urlToken);
+      } catch (e) {}
       // Clean up the URL
       window.history.replaceState({}, document.title, window.location.pathname);
     }
@@ -63,12 +71,16 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     // Listen for popup messages
     const handleMessage = (event: MessageEvent) => {
       const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.endsWith('.vercel.app') && !origin.includes('localhost') && origin !== window.location.origin) {
+      if (!origin.endsWith('.run.app') && !origin.includes('localhost') && origin !== window.location.origin) {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         if (event.data.token) {
-          setToken(event.data.token);
+          try {
+            localStorage.setItem('auth_token', event.data.token);
+          } catch (e) {
+            console.warn('localStorage block in OAUTH:', e);
+          }
         }
         fetchUser();
       }
@@ -83,12 +95,34 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGoogle = async (): Promise<string | null> => {
     try {
-      const url = `/api/auth/google/redirect?origin=${encodeURIComponent(window.location.origin)}`;
-      window.location.href = url;
+      const res = await apiFetch(`/api/auth/url?origin=${encodeURIComponent(window.location.origin)}`);
+      const text = await res.text();
+      
+      if (!res.ok) {
+        try {
+          const data = JSON.parse(text);
+          return data.error || '로그인 설정이 완료되지 않았습니다.';
+        } catch (e) {
+          return '서버 에러가 발생했습니다. (500)';
+        }
+      }
+
+      if (!text) return '서버로부터 응답이 없습니다.';
+      const data = JSON.parse(text);
+      
+      if (!data.url) {
+        return '구글 로그인 URL을 생성할 수 없습니다.';
+      }
+      // Use popup for iframes
+      const w = 500;
+      const h = 600;
+      const left = window.screen.width / 2 - w / 2;
+      const top = window.screen.height / 2 - h / 2;
+      window.open(data.url, 'oauth_popup', `width=${w},height=${h},top=${top},left=${left}`);
       return null;
     } catch (e) {
-      console.error('Error initiating Google Login:', e);
-      return 'Error initiating Google Login';
+      console.error('Error fetching OAuth URL:', e);
+      return '구글 로그인 초기화 중 네트워크 오류가 발생했습니다.';
     }
   };
 
