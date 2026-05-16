@@ -11,6 +11,7 @@ import PostDetail from './pages/PostDetail';
 import PostEditor from './pages/PostEditor';
 import Admin from './pages/Admin';
 import Profile from './pages/Profile';
+import Auth from './pages/Auth';
 import AuthContext from './components/AuthContext';
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Landing />} />
+            <Route path="auth" element={<Auth />} />
             <Route path="board" element={<Board />} />
             <Route path="board/new" element={<PostEditor />} />
             <Route path="board/:id" element={<PostDetail />} />

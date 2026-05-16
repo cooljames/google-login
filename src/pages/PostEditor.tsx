@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../components/AuthContext';
+import { apiFetch } from '../lib/api';
 
 export default function PostEditor() {
   const { user } = useAuth();
@@ -19,7 +20,7 @@ export default function PostEditor() {
   useEffect(() => {
     if (id) {
       setLoading(true);
-      fetch(`/api/posts/${id}`)
+      apiFetch(`/api/posts/${id}`)
         .then(r => r.json())
         .then(data => {
           if (data.error) throw new Error(data.error);
@@ -59,7 +60,7 @@ export default function PostEditor() {
         formData.append('remove_attachment', 'true');
       }
       
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         body: formData
       });

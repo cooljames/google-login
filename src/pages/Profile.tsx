@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../components/AuthContext';
+import { apiFetch } from '../lib/api';
 
 export default function Profile() {
   const { user } = useAuth();
@@ -25,7 +26,7 @@ export default function Profile() {
     setLoading(true);
     setMessage({ type: '', text: '' });
     try {
-      const res = await fetch('/api/me', {
+      const res = await apiFetch('/api/me', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../components/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
+import { apiFetch } from '../lib/api';
 
 export default function Board() {
   const { user } = useAuth();
@@ -9,7 +10,7 @@ export default function Board() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/posts')
+    apiFetch('/api/posts')
       .then(r => r.json())
       .then(data => {
         setPosts(data);

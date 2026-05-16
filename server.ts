@@ -7,6 +7,8 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import multer from 'multer';
 import { put } from '@vercel/blob';
+import bcrypt from 'bcryptjs';
+import nodemailer from 'nodemailer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,49 +39,203 @@ if (process.env.DATABASE_URL) {
   console.warn('DATABASE_URL is not set. Please provide Neon connection string.');
 }
 
+const getTransporter = async () => {
+  // If no real SMTP config is provided, we can use Ethereal Email for testing
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 587,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
+    });
+  }
+
+  // Fallback to test account
+  let testAccount = await nodemailer.createTestAccount();
+  console.log('Using Ethereal Mail for testing. Check Ethereal for emails.');
+
+  return nodemailer.createTransport({
+    host: "smtp.ethereal.email",
+    port: 587,
+    secure: false, // true for 465, false for other ports
+    auth: {
+      user: testAccount.user, // generated ethereal user
+      pass: testAccount.pass, // generated ethereal password
+    },
+  });
+};
+
 const initDb = async () => {
   if (!pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        email TEXT UNIQUE,
-        name TEXT,
-        picture TEXT,
-        role TEXT DEFAULT 'user',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE TABLE IF NOT EXISTS posts (
-        id SERIAL PRIMARY KEY,
-        type TEXT DEFAULT '일반',
-        title TEXT NOT NULL,
-        content TEXT,
-        author_id TEXT,
-        views INTEGER DEFAULT 0,
-        attachment_name TEXT,
-        attachment_url TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(author_id) REFERENCES users(id)
-      );
-    `);
-    
-    try { await pool.query("ALTER TABLE posts ADD COLUMN attachment_name TEXT;"); } catch(e) {}
-    try { await pool.query("ALTER TABLE posts ADD COLUMN attachment_url TEXT;"); } catch(e) {}
-    
+  
+  const queries = [
+    `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE,
+      name TEXT,
+      picture TEXT,
+      role TEXT DEFAULT 'user',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );`,
+    "ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_author_id_fkey;",
+    "ALTER TABLE users ALTER COLUMN id TYPE TEXT;",
+    `CREATE TABLE IF NOT EXISTS posts (
+      id SERIAL PRIMARY KEY,
+      type TEXT DEFAULT '일반',
+      title TEXT NOT NULL,
+      content TEXT,
+      author_id TEXT,
+      views INTEGER DEFAULT 0,
+      attachment_name TEXT,
+      attachment_url TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(author_id) REFERENCES users(id)
+    );`,
+    "ALTER TABLE posts ALTER COLUMN author_id TYPE TEXT;",
+    "ALTER TABLE users ADD COLUMN name TEXT;",
+    "ALTER TABLE users ADD COLUMN picture TEXT;",
+    "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user';",
+    "ALTER TABLE users ADD COLUMN password TEXT;",
+    "ALTER TABLE posts ADD COLUMN attachment_name TEXT;",
+    "ALTER TABLE posts ADD COLUMN attachment_url TEXT;"
+  ];
+
+  for (const query of queries) {
     try {
-      await pool.query("UPDATE users SET role = 'admin' WHERE email = 'dsayhong@gmail.com'");
-    } catch(e) {}
-  } catch (error) {
-    console.error('Failed to initialize database schema:', error);
+      await pool.query(query);
+    } catch (e: any) {
+      if (!e.message.includes('already exists')) {
+        console.warn(`Query failed: ${query}`, e.message);
+      }
+    }
   }
+
+  try {
+    await pool.query("UPDATE users SET role = 'admin' WHERE email = 'dsayhong@gmail.com'");
+  } catch(e) {}
 };
-initDb();
+const initDbPromise = initDb();
 
 /** -----------------------------------------
  * Authentication API
  * ----------------------------------------- */
-app.get('/api/auth/url', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
+  await initDbPromise;
+  const { email, password, name } = req.body;
+  if (!email || !password || !name) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const id = Date.now().toString() + Math.random().toString(36).substring(7);
+    const verificationToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+    
+    await pool.query(
+      'INSERT INTO users (id, email, name, password, is_email_verified, verification_token) VALUES ($1, $2, $3, $4, false, $5)',
+      [id, email, name, hashedPassword, verificationToken]
+    );
+
+    const transporter = await getTransporter();
+    const origin = req.headers.referer ? new URL(req.headers.referer).origin : (process.env.APP_URL || `http://localhost:${PORT}`);
+    const verifyLink = `${origin}/api/auth/verify?token=${verificationToken}`;
+    
+    const info = await transporter.sendMail({
+      from: '"MyApp" <noreply@myapp.com>',
+      to: email,
+      subject: "Please verify your email",
+      text: `Click the link to verify your email: ${verifyLink}`,
+      html: `<p>Click <a href="${verifyLink}">here</a> to verify your email.</p>`,
+    });
+
+    console.log("Verification email sent: %s", info.messageId);
+    if (info.messageId.includes('ethereal')) {
+      console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info));
+    }
+
+    res.json({ success: true, message: 'Registration successful! Please check your email to verify your account.' });
+  } catch (error: any) {
+    if (error.code === '23505') { // unique violation in Postgres
+      return res.status(400).json({ error: 'Email already in use' });
+    }
+    console.error('Register error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/auth/verify', async (req, res) => {
+  await initDbPromise;
+  const { token } = req.query;
+  if (!token) return res.status(400).send('Invalid token');
+
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE verification_token = $1', [token]);
+    if (rows.length === 0) {
+      return res.status(400).send('Invalid or expired verification token.');
+    }
+
+    await pool.query('UPDATE users SET is_email_verified = true, verification_token = NULL WHERE verification_token = $1', [token]);
+    res.send(`
+      <html>
+        <head><meta charset="utf-8" /></head>
+        <body>
+          <script>
+            alert('이메일 인증이 완료되었습니다. 이제 로그인할 수 있습니다.');
+            window.location.href = '/auth';
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Verify error:', error);
+    res.status(500).send('Error verifying email.');
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  await initDbPromise;
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Missing email or password' });
+  }
+
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = rows[0];
+    if (!user || !user.password) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    if (!user.is_email_verified) {
+      return res.status(403).json({ error: 'Please verify your email before logging in.' });
+    }
+
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const sessionToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+
+    res.cookie('auth_token', sessionToken, {
+      secure: true,
+      sameSite: 'none',
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({ success: true, token: sessionToken, user: { id: user.id, email: user.email, name: user.name, picture: user.picture } });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/auth/url', async (req, res) => {
+  await initDbPromise;
   const origin = req.query.origin || (req.headers.referer ? new URL(req.headers.referer).origin : (process.env.APP_URL || `http://localhost:${PORT}`));
   const redirectUri = `${origin}/auth/callback`;
 
@@ -102,6 +258,7 @@ app.get('/api/auth/url', (req, res) => {
 });
 
 app.get('/auth/callback', async (req, res) => {
+  await initDbPromise;
   const { code, state } = req.query;
   
   if (!code) {
@@ -152,12 +309,13 @@ app.get('/auth/callback', async (req, res) => {
 
     if (pool) {
       await pool.query(`
-        INSERT INTO users (id, email, name, picture) 
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (id, email, name, picture, is_email_verified) 
+        VALUES ($1, $2, $3, $4, true)
         ON CONFLICT(id) DO UPDATE SET
           email = EXCLUDED.email,
           name = EXCLUDED.name,
-          picture = EXCLUDED.picture
+          picture = EXCLUDED.picture,
+          is_email_verified = true
       `, [user.id, user.email, user.name, user.picture]);
     }
 
@@ -175,7 +333,7 @@ app.get('/auth/callback', async (req, res) => {
         <body>
           <script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${sessionToken}' }, '*');
               window.close();
             } else {
               window.location.href = '/';
@@ -192,12 +350,14 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 async function requireAuth(req: any, res: any, next: any) {
-  const token = req.cookies.auth_token;
+  const customHeaderToken = req.headers.authorization?.split(' ')[1];
+  const token = customHeaderToken || req.cookies.auth_token;
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     if (!pool) return res.status(500).json({ error: 'Database not initialized' });
+    await initDbPromise;
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
     const user = rows[0];
     if (!user) {
@@ -244,6 +404,7 @@ app.post('/api/logout', (req, res) => {
  * Board API
  * ----------------------------------------- */
 app.get('/api/posts', async (req, res) => {
+  await initDbPromise;
   if (!pool) return res.status(500).json({ error: 'Database not initialized' });
   const { rows } = await pool.query(`
     SELECT p.*, u.name as author 

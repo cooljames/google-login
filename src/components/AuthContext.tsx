@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { apiFetch } from '../lib/api';
 
 interface User {
   id: string;
@@ -11,6 +12,9 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: () => void;
+  loginWithGoogle: () => void;
+  loginWithEmail: (email: string, password: string) => Promise<string | null>;
+  registerWithEmail: (email: string, password: string, name: string) => Promise<string | null>;
   logout: () => void;
   refreshUser: () => void;
 }
@@ -29,7 +33,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUser = async () => {
     try {
-      const res = await fetch('/api/me');
+      const res = await apiFetch('/api/me');
       if (res.ok) {
         setUser(await res.json());
       } else {
@@ -52,6 +56,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        if (event.data.token) localStorage.setItem('auth_token', event.data.token);
         fetchUser();
       }
     };
@@ -59,9 +64,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  const login = async () => {
+  const login = () => {
+    window.location.href = '/auth';
+  };
+
+  const loginWithGoogle = async () => {
     try {
-      const res = await fetch(`/api/auth/url?origin=${encodeURIComponent(window.location.origin)}`);
+      const res = await apiFetch(`/api/auth/url?origin=${encodeURIComponent(window.location.origin)}`);
       const { url } = await res.json();
       if (!url) {
         alert('Set up Google Client ID / Secret first.');
@@ -77,13 +86,46 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const loginWithEmail = async (email: string, password: string): Promise<string | null> => {
+    try {
+      const res = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) return data.error || 'Login failed';
+      localStorage.setItem('auth_token', data.token);
+      fetchUser();
+      return null;
+    } catch (err) {
+      return 'Network error';
+    }
+  };
+
+  const registerWithEmail = async (email: string, password: string, name: string): Promise<string | null> => {
+    try {
+      const res = await apiFetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name })
+      });
+      const data = await res.json();
+      if (!res.ok) return data.error || 'Registration failed';
+      return data.message || 'Registration successful';
+    } catch (err) {
+      return 'Network error';
+    }
+  };
+
   const logout = async () => {
-    await fetch('/api/logout', { method: 'POST' });
+    localStorage.removeItem('auth_token');
+    await apiFetch('/api/logout', { method: 'POST' });
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser: fetchUser }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithGoogle, loginWithEmail, registerWithEmail, logout, refreshUser: fetchUser }}>
       {children}
     </AuthContext.Provider>
   );

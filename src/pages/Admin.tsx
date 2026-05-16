@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../components/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../lib/api';
 
 export default function Admin() {
   const { user, loading: authLoading } = useAuth();
@@ -21,12 +22,12 @@ export default function Admin() {
 
   useEffect(() => {
     if (user?.role === 'admin') {
-      fetch('/api/admin/stats')
+      apiFetch('/api/admin/stats')
         .then(r => r.json())
         .then(setStats)
         .catch(console.error);
         
-      fetch('/api/admin/users')
+      apiFetch('/api/admin/users')
         .then(r => r.json())
         .then(setUsers)
         .catch(console.error);
@@ -35,7 +36,7 @@ export default function Admin() {
 
   useEffect(() => {
     if (user?.role === 'admin' && view === 'posts') {
-      fetch('/api/posts')
+      apiFetch('/api/posts')
         .then(r => r.json())
         .then(setPosts)
         .catch(console.error);
@@ -48,7 +49,7 @@ export default function Admin() {
       message: `사용자의 권한을 ${newRole}로 변경하시겠습니까?`,
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/admin/users/${userId}/role`, {
+          const res = await apiFetch(`/api/admin/users/${userId}/role`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role: newRole })
@@ -69,7 +70,7 @@ export default function Admin() {
       message: '정말 삭제하시겠습니까?',
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/posts/${postId}`, { method: 'DELETE' });
+          const res = await apiFetch(`/api/posts/${postId}`, { method: 'DELETE' });
           if (!res.ok) throw new Error('삭제 실패');
           setPosts(posts.filter(p => p.id !== postId));
           setStats(s => ({ ...s, postsCount: s.postsCount - 1 }));
@@ -89,7 +90,7 @@ export default function Admin() {
       
       {confirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-md">
-          <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-sm w-full border border-outline-variant shadow-lg flex flex-col gap-md">
+          <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-[384px] w-full border border-outline-variant shadow-lg flex flex-col gap-md">
             <p className="font-body-lg text-on-surface text-center break-keep">{confirmModal.message}</p>
             <div className="flex justify-center gap-sm mt-xs">
               <button onClick={() => setConfirmModal(null)} className="px-md py-sm rounded bg-surface-container hover:bg-surface-variant text-on-surface transition-colors font-label-md shrink-0">취소</button>
@@ -101,7 +102,7 @@ export default function Admin() {
 
       {errorModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-md">
-          <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-sm w-full border border-outline-variant shadow-lg flex flex-col gap-md">
+          <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-[384px] w-full border border-outline-variant shadow-lg flex flex-col gap-md">
             <p className="font-body-lg text-on-surface text-center text-error break-keep">{errorModal}</p>
             <div className="flex justify-center mt-xs">
               <button onClick={() => setErrorModal('')} className="px-md py-sm rounded bg-primary text-on-primary hover:bg-primary-container transition-colors font-label-md shrink-0">확인</button>

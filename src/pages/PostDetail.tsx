@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../components/AuthContext';
+import { apiFetch } from '../lib/api';
 
 export default function PostDetail() {
   const { id } = useParams();
@@ -12,7 +13,7 @@ export default function PostDetail() {
   const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/posts/${id}`)
+    apiFetch(`/api/posts/${id}`)
       .then(r => r.json())
       .then(data => {
         if (data.error) throw new Error(data.error);
@@ -24,7 +25,7 @@ export default function PostDetail() {
 
   const handleDelete = async () => {
     try {
-      const res = await fetch(`/api/posts/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/posts/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('삭제 실패');
       navigate('/board');
     } catch (e) {
@@ -45,7 +46,7 @@ export default function PostDetail() {
         
         {showConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-md">
-            <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-sm w-full border border-outline-variant shadow-lg flex flex-col gap-md">
+            <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-[384px] w-full border border-outline-variant shadow-lg flex flex-col gap-md">
               <p className="font-body-lg text-on-surface text-center break-keep">정말 삭제하시겠습니까?</p>
               <div className="flex justify-center gap-sm mt-xs">
                 <button onClick={() => setShowConfirm(false)} className="px-md py-sm rounded bg-surface-container hover:bg-surface-variant text-on-surface transition-colors font-label-md shrink-0">취소</button>
@@ -57,7 +58,7 @@ export default function PostDetail() {
 
         {errorModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-md">
-            <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-sm w-full border border-outline-variant shadow-lg flex flex-col gap-md">
+            <div className="bg-surface-container-lowest p-lg rounded-xl min-w-[320px] max-w-[384px] w-full border border-outline-variant shadow-lg flex flex-col gap-md">
               <p className="font-body-lg text-on-surface text-center text-error break-keep">{errorModal}</p>
               <div className="flex justify-center mt-xs">
                 <button onClick={() => setErrorModal('')} className="px-md py-sm rounded bg-primary text-on-primary hover:bg-primary-container transition-colors font-label-md shrink-0">확인</button>
