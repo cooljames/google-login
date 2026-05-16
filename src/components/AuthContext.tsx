@@ -88,10 +88,18 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithGoogle = async (): Promise<string | null> => {
     try {
+      // 팝업 차단을 우회하기 위해 비동기 호출 전에 창을 먼저 엽니다.
+      const w = 500;
+      const h = 600;
+      const left = window.screen.width / 2 - w / 2;
+      const top = window.screen.height / 2 - h / 2;
+      const popup = window.open('', 'oauth_popup', `width=${w},height=${h},top=${top},left=${left}`);
+
       const res = await apiFetch(`/api/auth/url?origin=${encodeURIComponent(window.location.origin)}`);
       const text = await res.text();
       
       if (!res.ok) {
+        if (popup) popup.close();
         try {
           const data = JSON.parse(text);
           return data.error || '로그인 설정이 완료되지 않았습니다.';
@@ -100,18 +108,24 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      if (!text) return '서버로부터 응답이 없습니다.';
+      if (!text) {
+        if (popup) popup.close();
+        return '서버로부터 응답이 없습니다.';
+      }
+      
       const data = JSON.parse(text);
       
       if (!data.url) {
+        if (popup) popup.close();
         return '구글 로그인 URL을 생성할 수 없습니다.';
       }
-      // Use popup for iframes
-      const w = 500;
-      const h = 600;
-      const left = window.screen.width / 2 - w / 2;
-      const top = window.screen.height / 2 - h / 2;
-      window.open(data.url, 'oauth_popup', `width=${w},height=${h},top=${top},left=${left}`);
+      
+      if (popup) {
+        popup.location.href = data.url;
+      } else {
+        // 팝업이 여전히 차단된 경우 현재 창에서 이동
+        window.location.href = data.url;
+      }
       return null;
     } catch (e) {
       console.error('Error fetching OAuth URL:', e);
