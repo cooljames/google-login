@@ -38,9 +38,9 @@ export default function Layout() {
                 로그아웃
               </button>
             ) : (
-               <button onClick={login} className="font-label-md text-label-md text-primary dark:text-primary-fixed-dim hover:bg-surface-container-low dark:hover:bg-secondary-fixed-variant transition-colors active:scale-95 duration-200 py-2 px-4 rounded-DEFAULT">
+               <Link to="/auth" className="font-label-md text-label-md text-primary dark:text-primary-fixed-dim hover:bg-surface-container-low dark:hover:bg-secondary-fixed-variant transition-colors active:scale-95 duration-200 py-2 px-4 rounded-DEFAULT">
                 로그인
-              </button>
+              </Link>
             )}
           </div>
         </div>

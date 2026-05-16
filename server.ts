@@ -2,16 +2,16 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
 import fs from 'fs';
 import multer from 'multer';
 import { put } from '@vercel/blob';
 import bcrypt from 'bcryptjs';
 import nodemailer from 'nodemailer';
+import pg from 'pg';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// File setup
+// __filename and __dirname removed for Vercel compat
 
 // Replace local diskStorage with memoryStorage for Vercel Blob
 const upload = multer({ storage: multer.memoryStorage() });
@@ -25,8 +25,6 @@ app.use(cookieParser());
 const JWT_SECRET = process.env.JWT_SECRET || 'DEV_SECRET_KEY_CHANGE_IN_PROD';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-
-import pg from 'pg';
 
 let pool: pg.Pool;
 
@@ -135,28 +133,28 @@ app.post('/api/auth/register', async (req, res) => {
     const verificationToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
     
     await pool.query(
-      'INSERT INTO users (id, email, name, password, is_email_verified, verification_token) VALUES ($1, $2, $3, $4, false, $5)',
+      'INSERT INTO users (id, email, name, password, is_email_verified, verification_token) VALUES ($1, $2, $3, $4, true, $5)',
       [id, email, name, hashedPassword, verificationToken]
     );
 
+    const token = jwt.sign({ userId: id, email }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+
+    // Send email async without waiting or blocking
     const transporter = await getTransporter();
     const origin = req.headers.referer ? new URL(req.headers.referer).origin : (process.env.APP_URL || `http://localhost:${PORT}`);
     const verifyLink = `${origin}/api/auth/verify?token=${verificationToken}`;
     
-    const info = await transporter.sendMail({
+    transporter.sendMail({
       from: '"MyApp" <noreply@myapp.com>',
       to: email,
-      subject: "Please verify your email",
-      text: `Click the link to verify your email: ${verifyLink}`,
-      html: `<p>Click <a href="${verifyLink}">here</a> to verify your email.</p>`,
-    });
+      subject: "Welcome to MyApp!",
+      text: `Hello ${name}! Welcome to MyApp!`,
+      html: `<p>Hello ${name}! Welcome to MyApp!</p>`,
+    }).then(info => {
+      console.log("Welcome email sent: %s", info.messageId);
+    }).catch(console.error);
 
-    console.log("Verification email sent: %s", info.messageId);
-    if (info.messageId.includes('ethereal')) {
-      console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info));
-    }
-
-    res.json({ success: true, message: 'Registration successful! Please check your email to verify your account.' });
+    res.json({ success: true, message: 'Registration successful!', token });
   } catch (error: any) {
     if (error.code === '23505') { // unique violation in Postgres
       return res.status(400).json({ error: 'Email already in use' });
@@ -180,12 +178,28 @@ app.get('/api/auth/verify', async (req, res) => {
     await pool.query('UPDATE users SET is_email_verified = true, verification_token = NULL WHERE verification_token = $1', [token]);
     res.send(`
       <html>
-        <head><meta charset="utf-8" /></head>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f4f8; margin: 0; }
+            .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+            h1 { color: #2d3748; }
+            p { color: #4a5568; margin-bottom: 1.5rem; }
+            a { display: inline-block; background: #4299e1; color: white; padding: 0.5rem 1rem; border-radius: 4px; text-decoration: none; font-weight: bold; }
+            a:hover { background: #3182ce; }
+          </style>
+        </head>
         <body>
-          <script>
-            alert('이메일 인증이 완료되었습니다. 이제 로그인할 수 있습니다.');
-            window.location.href = '/auth';
-          </script>
+          <div class="card">
+            <h1>이메일 인증 완료</h1>
+            <p>이메일 인증이 성공적으로 완료되었습니다. 이제 로그인할 수 있습니다.</p>
+            <p>자동으로 이동 중...</p>
+            <script>
+              setTimeout(function() {
+                window.location.href = '/auth';
+              }, 2000);
+            </script>
+          </div>
         </body>
       </html>
     `);
@@ -332,14 +346,19 @@ app.get('/auth/callback', async (req, res) => {
       <html>
         <body>
           <script>
+            try {
+              localStorage.setItem('auth_token', '${sessionToken}');
+            } catch (e) {
+              console.warn('localStorage block in callback:', e);
+            }
             if (window.opener) {
               window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${sessionToken}' }, '*');
               window.close();
             } else {
-              window.location.href = '/';
+              window.location.href = '/board?token=${sessionToken}';
             }
           </script>
-          <p>로그인 성공했습니다. 창이 자동으로 닫힙니다.</p>
+          <p>로그인 성공했습니다. 이동 중...</p>
         </body>
       </html>
     `);
@@ -572,7 +591,8 @@ app.put('/api/admin/users/:id/role', requireAuth, requireAdmin, async (req, res)
 async function startServer() {
   if (!process.env.VERCEL) {
     if (process.env.NODE_ENV !== 'production') {
-      const { createServer: createViteServer } = await import('vite');
+      const viteName = 'vite';
+      const { createServer: createViteServer } = await import(viteName /* @vite-ignore */);
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'spa',

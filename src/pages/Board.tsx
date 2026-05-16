@@ -32,7 +32,7 @@ export default function Board() {
             if (user) {
               navigate('/board/new');
             } else {
-              alert('로그인이 필요합니다.');
+              navigate('/auth');
             }
           }}
         >

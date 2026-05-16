@@ -12,7 +12,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: () => void;
-  loginWithGoogle: () => void;
+  loginWithGoogle: () => Promise<string | null>;
   loginWithEmail: (email: string, password: string) => Promise<string | null>;
   registerWithEmail: (email: string, password: string, name: string) => Promise<string | null>;
   logout: () => void;
@@ -47,6 +47,17 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // Check if there is a token in the URL (from OAuth redirect)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get('token');
+    if (urlToken) {
+      try {
+        localStorage.setItem('auth_token', urlToken);
+      } catch (e) {}
+      // Clean up the URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     fetchUser();
 
     // Listen for popup messages
@@ -56,7 +67,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        if (event.data.token) localStorage.setItem('auth_token', event.data.token);
+        if (event.data.token) {
+          try {
+            localStorage.setItem('auth_token', event.data.token);
+          } catch (e) {
+            console.warn('localStorage block in OAUTH:', e);
+          }
+        }
         fetchUser();
       }
     };
@@ -68,21 +85,26 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = '/auth';
   };
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = async (): Promise<string | null> => {
     try {
       const res = await apiFetch(`/api/auth/url?origin=${encodeURIComponent(window.location.origin)}`);
-      const { url } = await res.json();
-      if (!url) {
-        alert('Set up Google Client ID / Secret first.');
-        return;
+      const data = await res.json();
+      if (!res.ok) {
+        return data.error || 'Set up Google Client ID / Secret first.';
       }
-      const authWindow = window.open(url, 'oauth_popup', 'width=500,height=600');
-      if (!authWindow) {
-        alert('Please allow popups to login.');
+      if (!data.url) {
+        return 'Set up Google Client ID / Secret first.';
       }
+      // Use popup for iframes
+      const w = 500;
+      const h = 600;
+      const left = window.screen.width / 2 - w / 2;
+      const top = window.screen.height / 2 - h / 2;
+      window.open(data.url, 'oauth_popup', `width=${w},height=${h},top=${top},left=${left}`);
+      return null;
     } catch (e) {
-      console.error(e);
-      alert('Error fetching OAuth URL');
+      console.error('Error fetching OAuth URL:', e);
+      return 'Error initiating Google Login';
     }
   };
 
@@ -95,7 +117,11 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       });
       const data = await res.json();
       if (!res.ok) return data.error || 'Login failed';
-      localStorage.setItem('auth_token', data.token);
+      try {
+        localStorage.setItem('auth_token', data.token);
+      } catch (e) {
+        console.warn('localStorage block in login:', e);
+      }
       fetchUser();
       return null;
     } catch (err) {
@@ -112,6 +138,16 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       });
       const data = await res.json();
       if (!res.ok) return data.error || 'Registration failed';
+      
+      if (data.token) {
+        try {
+          localStorage.setItem('auth_token', data.token);
+        } catch (e) {
+          console.warn('localStorage block in register:', e);
+        }
+        fetchUser();
+      }
+      
       return data.message || 'Registration successful';
     } catch (err) {
       return 'Network error';
@@ -119,7 +155,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    localStorage.removeItem('auth_token');
+    try {
+      localStorage.removeItem('auth_token');
+    } catch (e) {}
     await apiFetch('/api/logout', { method: 'POST' });
     setUser(null);
   };

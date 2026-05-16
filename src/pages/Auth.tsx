@@ -10,6 +10,7 @@ export default function Auth() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
 
   if (user) {
     return <Navigate to="/board" replace />;
@@ -18,7 +19,21 @@ export default function Auth() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setMessage('');
     
+    if (!email) {
+      setError('이메일을 입력해주세요.');
+      return;
+    }
+    if (!password) {
+      setError('비밀번호를 입력해주세요.');
+      return;
+    }
+    if (!isLogin && !name) {
+      setError('이름을 입력해주세요.');
+      return;
+    }
+
     if (isLogin) {
       const err = await loginWithEmail(email, password);
       if (err) setError(err);
@@ -26,7 +41,7 @@ export default function Auth() {
     } else {
       const result = await registerWithEmail(email, password, name);
       if (result && result.includes('Registration successful')) {
-        alert('회원가입이 완료되었습니다. 이메일을 확인하여 계정을 인증해주세요.');
+        setMessage(result);
         setIsLogin(true);
       } else if (result) {
         setError(result);
@@ -44,8 +59,14 @@ export default function Auth() {
         </h2>
         
         {error && (
-          <div className="bg-error-container text-on-error-container p-3 mb-6 rounded text-sm text-center">
+          <div className="bg-error-container text-on-error-container p-3 mb-6 rounded text-sm text-center break-words">
             {error}
+          </div>
+        )}
+
+        {message && (
+          <div className="bg-primary-container text-on-primary-container p-3 mb-6 rounded text-sm text-center break-words">
+            {message}
           </div>
         )}
 
@@ -58,7 +79,6 @@ export default function Auth() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full rounded-md border border-outline-variant px-3 py-2 text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary text-sm"
-                required
               />
             </div>
           )}
@@ -66,11 +86,10 @@ export default function Auth() {
           <div>
             <label className="block text-sm font-medium text-on-surface-variant mb-1">이메일 주소</label>
             <input
-              type="email"
+              type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md border border-outline-variant px-3 py-2 text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary text-sm"
-              required
             />
           </div>
           
@@ -81,7 +100,6 @@ export default function Auth() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border border-outline-variant px-3 py-2 text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary text-sm"
-              required
             />
           </div>
 
@@ -107,7 +125,11 @@ export default function Auth() {
 
           <div className="mt-6">
             <button
-              onClick={() => loginWithGoogle()}
+              type="button"
+              onClick={async () => {
+                const err = await loginWithGoogle();
+                if (err) setError(err);
+              }}
               className="w-full flex items-center justify-center gap-3 py-2 px-4 border border-outline-variant rounded-md shadow-sm bg-surface text-sm font-medium text-on-surface hover:bg-surface-container-low focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors"
             >
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -123,7 +145,12 @@ export default function Auth() {
 
         <div className="text-center mt-6">
           <button
-            onClick={() => setIsLogin(!isLogin)}
+            type="button"
+            onClick={() => {
+              setIsLogin(!isLogin);
+              setError('');
+              setMessage('');
+            }}
             className="text-sm font-medium text-primary hover:underline"
           >
             {isLogin ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
