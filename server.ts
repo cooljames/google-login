@@ -752,30 +752,26 @@ app.put('/api/admin/users/:id/role', requireAuth, requireAdmin, async (req, res)
   res.json({ success: true });
 });
 
-app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req: any, res: any) => {
-  console.log('DELETE /api/admin/users/:id HIT!', req.params.id);
-  const { id } = req.params;
-
-  if (req.user.id === id) {
-    return res.status(400).json({ error: '자기 자신은 삭제할 수 없습니다.' });
+app.delete('/api/admin/posts/bulk', requireAuth, requireAdmin, async (req: any, res: any) => {
+  const { postIds } = req.body;
+  if (!Array.isArray(postIds) || postIds.length === 0) {
+    return res.status(400).json({ error: '삭제할 게시글 ID 목록을 제공해야 합니다.' });
   }
 
   try {
     await initDbPromise;
     if (!pool) throw new Error('Database pool not initialized');
 
-    console.log(`Admin ${req.user.email} is deleting user ID: ${id}`);
+    console.log(`Admin ${req.user.email} is bulk deleting post IDs: ${postIds.join(', ')}`);
 
-    // 1. 사용자의 게시글 삭제
-    await pool.query('DELETE FROM posts WHERE author_id = $1', [id]);
-    // 2. 사용자 삭제
-    const result = await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    // Delete posts from database
+    const result = await pool.query('DELETE FROM posts WHERE id = ANY($1)', [postIds.map(Number)]);
 
-    console.log(`Successfully deleted user ${id}. Rows affected: ${result.rowCount}`);
-    res.json({ success: true });
+    console.log(`Successfully bulk deleted posts. Rows affected: ${result.rowCount}`);
+    res.json({ success: true, deletedCount: result.rowCount });
   } catch (e) {
-    console.error('Failed to delete user:', e);
-    res.status(500).json({ error: '사용자 삭제 실패: ' + (e as Error).message });
+    console.error('Failed to bulk delete posts:', e);
+    res.status(500).json({ error: '게시글 일괄 삭제 실패: ' + (e as Error).message });
   }
 });
 
@@ -807,6 +803,33 @@ app.delete('/api/admin/users/bulk', requireAuth, requireAdmin, async (req: any, 
   } catch (e) {
     console.error('Failed to bulk delete users:', e);
     res.status(500).json({ error: '사용자 일괄 삭제 실패: ' + (e as Error).message });
+  }
+});
+
+app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req: any, res: any) => {
+  console.log('DELETE /api/admin/users/:id HIT!', req.params.id);
+  const { id } = req.params;
+
+  if (req.user.id === id) {
+    return res.status(400).json({ error: '자기 자신은 삭제할 수 없습니다.' });
+  }
+
+  try {
+    await initDbPromise;
+    if (!pool) throw new Error('Database pool not initialized');
+
+    console.log(`Admin ${req.user.email} is deleting user ID: ${id}`);
+
+    // 1. 사용자의 게시글 삭제
+    await pool.query('DELETE FROM posts WHERE author_id = $1', [id]);
+    // 2. 사용자 삭제
+    const result = await pool.query('DELETE FROM users WHERE id = $1', [id]);
+
+    console.log(`Successfully deleted user ${id}. Rows affected: ${result.rowCount}`);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Failed to delete user:', e);
+    res.status(500).json({ error: '사용자 삭제 실패: ' + (e as Error).message });
   }
 });
 

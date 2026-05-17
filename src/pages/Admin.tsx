@@ -13,6 +13,10 @@ export default function Admin() {
   const [confirmModal, setConfirmModal] = useState<{message: string, onConfirm: () => void} | null>(null);
   const [errorModal, setErrorModal] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
+  const [postPage, setPostPage] = useState(1);
+  const [postTotalPages, setPostTotalPages] = useState(1);
+  const postLimit = 10;
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== 'admin')) {
@@ -41,17 +45,29 @@ export default function Admin() {
     }
   }, [user]);
 
-  useEffect(() => {
+  const loadPosts = () => {
     if (user?.role === 'admin' && view === 'posts') {
-      apiFetch('/api/posts?limit=100')
+      apiFetch(`/api/posts?page=${postPage}&limit=${postLimit}`)
         .then(async r => {
           const text = await r.text();
-          return text ? JSON.parse(text) : { items: [] };
+          return text ? JSON.parse(text) : { items: [], pagination: { totalPages: 1 } };
         })
-        .then(data => setPosts(Array.isArray(data) ? data : (data.items || [])))
+        .then(data => {
+          if (Array.isArray(data)) {
+            setPosts(data);
+            setPostTotalPages(1);
+          } else {
+            setPosts(data.items || []);
+            setPostTotalPages(data.pagination?.totalPages || 1);
+          }
+        })
         .catch(console.error);
     }
-  }, [user, view]);
+  };
+
+  useEffect(() => {
+    loadPosts();
+  }, [user, view, postPage]);
 
   const handleRoleChange = async (userId: string, currentRole: string) => {
     const newRole = currentRole === 'admin' ? 'user' : 'admin';
@@ -82,8 +98,9 @@ export default function Admin() {
         try {
           const res = await apiFetch(`/api/posts/${postId}`, { method: 'DELETE' });
           if (!res.ok) throw new Error('삭제 실패');
-          setPosts(posts.filter(p => p.id !== postId));
+          loadPosts();
           setStats(s => ({ ...s, postsCount: s.postsCount - 1 }));
+          setSelectedPostIds(selectedPostIds.filter(id => id !== postId));
         } catch (e) {
           setErrorModal((e as Error).message);
         } finally {
@@ -91,6 +108,56 @@ export default function Admin() {
         }
       }
     });
+  };
+
+  const handleBulkDeletePosts = async () => {
+    if (selectedPostIds.length === 0) return;
+    
+    setConfirmModal({
+      message: `선택한 ${selectedPostIds.length}개의 게시글을 정말 삭제하시겠습니까?`,
+      onConfirm: async () => {
+        try {
+          const res = await apiFetch(`/api/admin/posts/bulk`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postIds: selectedPostIds })
+          });
+          
+          const text = await res.text();
+          if (!res.ok) {
+            let errorMsg = '일괄 삭제 실패';
+            try {
+              if (text) {
+                const data = JSON.parse(text);
+                errorMsg = data.error || errorMsg;
+              }
+            } catch (e) {}
+            throw new Error(errorMsg);
+          }
+          
+          loadPosts();
+          setStats(s => ({ ...s, postsCount: s.postsCount - selectedPostIds.length }));
+          setSelectedPostIds([]);
+        } catch (e) {
+          setErrorModal((e as Error).message);
+        } finally {
+          setConfirmModal(null);
+        }
+      }
+    });
+  };
+
+  const getPostPageNumbers = () => {
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, postPage - Math.floor(maxVisiblePages / 2));
+    let endPage = startPage + maxVisiblePages - 1;
+    if (endPage > postTotalPages) {
+      endPage = postTotalPages;
+      startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+    const pages = [];
+    for (let i = startPage; i <= endPage; i++) pages.push(i);
+    return pages;
   };
 
   const handleDeleteUser = async (userId: string, userName: string) => {
@@ -348,32 +415,73 @@ export default function Admin() {
         ) : (
           <div className="flex flex-col gap-md">
             <div className="flex justify-between items-center bg-surface-container-lowest border border-outline-variant p-sm rounded-xl">
-              <span className="font-body-md text-on-surface-variant pl-xs">총 {posts.length}개의 게시물</span>
-              <button
-                onClick={() => navigate('/board/new?admin=true')}
-                className="px-md py-sm rounded bg-primary text-on-primary hover:bg-primary-container hover:shadow-md transition-colors font-label-md shrink-0 flex items-center gap-xs"
-              >
-                <span className="material-symbols-outlined text-[18px]">add</span>
-                새 글 등록
-              </button>
+              <span className="font-body-md text-on-surface-variant pl-xs">
+                총 {stats.postsCount}개의 게시물 중 {selectedPostIds.length}개 선택됨
+              </span>
+              <div className="flex items-center gap-sm">
+                <button
+                  disabled={selectedPostIds.length === 0}
+                  onClick={handleBulkDeletePosts}
+                  className="px-md py-sm rounded bg-error text-on-error hover:bg-error-container disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-label-md shrink-0 flex items-center gap-xs"
+                >
+                  <span className="material-symbols-outlined text-[18px]">delete</span>
+                  선택 삭제
+                </button>
+                <button
+                  onClick={() => navigate('/board/new?admin=true')}
+                  className="px-md py-sm rounded bg-primary text-on-primary hover:bg-primary-container hover:shadow-md transition-colors font-label-md shrink-0 flex items-center gap-xs"
+                >
+                  <span className="material-symbols-outlined text-[18px]">add</span>
+                  새 글 등록
+                </button>
+              </div>
             </div>
 
             <section className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
-              <div className="p-sm bg-surface-container-low border-b border-outline-variant grid grid-cols-12 gap-sm font-label-md text-on-surface-variant">
+              <div className="p-sm bg-surface-container-low border-b border-outline-variant grid grid-cols-12 gap-sm font-label-md text-on-surface-variant items-center">
+                <div className="col-span-1 text-center">
+                  <input 
+                    type="checkbox"
+                    checked={posts.length > 0 && selectedPostIds.length === posts.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedPostIds(posts.map(p => p.id));
+                      } else {
+                        setSelectedPostIds([]);
+                      }
+                    }}
+                    className="w-4 h-4 cursor-pointer"
+                  />
+                </div>
                 <div className="col-span-2">카테고리</div>
                 <div className="col-span-5">제목</div>
-                <div className="col-span-3">작성자</div>
+                <div className="col-span-2">작성자</div>
                 <div className="col-span-2 text-center">관리</div>
               </div>
               {posts.map(p => (
                 <div key={p.id} className="p-sm border-b border-outline-variant grid grid-cols-12 gap-sm items-center font-body-sm text-on-surface hover:bg-surface-container-low">
+                  <div className="col-span-1 text-center">
+                    <input 
+                      type="checkbox"
+                      checked={selectedPostIds.includes(p.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedPostIds([...selectedPostIds, p.id]);
+                        } else {
+                          setSelectedPostIds(selectedPostIds.filter(id => id !== p.id));
+                        }
+                      }}
+                      className="w-4 h-4 cursor-pointer"
+                    />
+                  </div>
                   <div className="col-span-2">
                     <span className="bg-surface-variant text-on-surface font-label-sm text-label-sm px-2 py-1 rounded">{p.type}</span>
                   </div>
-                  <div className="col-span-5 truncate">
+                  <div className="col-span-5 truncate flex items-center gap-xs">
                     <a href={`/board/${p.id}`} className="hover:underline text-primary font-semibold">{p.title}</a>
+                    {p.attachmentName && <span className="material-symbols-outlined text-[16px] text-outline" title="첨부파일 있음">attachment</span>}
                   </div>
-                  <div className="col-span-3 truncate">{p.author || '알 수 없음'}</div>
+                  <div className="col-span-2 truncate">{p.author || '알 수 없음'}</div>
                   <div className="col-span-2 text-center flex justify-center gap-sm">
                     <button 
                       onClick={() => navigate(`/board/edit/${p.id}?admin=true`)}
@@ -396,6 +504,40 @@ export default function Admin() {
                 </div>
               )}
             </section>
+
+            {postTotalPages > 1 && (
+              <div className="flex justify-center mt-lg gap-xs">
+                <button 
+                  onClick={() => {
+                    if (postPage > 1) setPostPage(postPage - 1);
+                  }}
+                  disabled={postPage === 1}
+                  className="p-xs text-on-surface-variant border border-outline-variant rounded hover:bg-surface-container-low transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="material-symbols-outlined text-[20px]">chevron_left</span>
+                </button>
+                
+                {getPostPageNumbers().map(pageNum => (
+                  <button 
+                    key={pageNum}
+                    onClick={() => setPostPage(pageNum)}
+                    className={`w-[36px] h-[36px] rounded flex items-center justify-center font-label-md text-label-md transition-colors ${pageNum === postPage ? 'bg-primary text-on-primary' : 'text-on-surface border border-transparent hover:bg-surface-container-low'}`}
+                  >
+                    {pageNum}
+                  </button>
+                ))}
+
+                <button 
+                  onClick={() => {
+                    if (postPage < postTotalPages) setPostPage(postPage + 1);
+                  }}
+                  disabled={postPage === postTotalPages}
+                  className="p-xs text-on-surface-variant border border-outline-variant rounded hover:bg-surface-container-low transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="material-symbols-outlined text-[20px]">chevron_right</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
