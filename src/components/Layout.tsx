@@ -80,6 +80,16 @@ export default function Layout() {
                       <span className="material-symbols-outlined text-[20px]">person</span>
                       프로필
                     </Link>
+                    {user?.role === 'admin' && (
+                      <Link 
+                        to="/admin" 
+                        className="px-md py-sm font-body-md text-on-surface hover:bg-surface-container-low transition-colors flex items-center gap-sm"
+                        onClick={() => setIsDropdownOpen(false)}
+                      >
+                        <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
+                        관리자
+                      </Link>
+                    )}
                     <button 
                       onClick={handleLogout}
                       className="w-full text-left px-md py-sm font-body-md text-error hover:bg-error-container hover:text-on-error-container transition-colors flex items-center gap-sm"

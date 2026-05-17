@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../components/AuthContext';
 import { apiFetch } from '../lib/api';
 
@@ -7,6 +7,8 @@ export default function PostEditor() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const isAdminView = searchParams.get('admin') === 'true';
   
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -68,7 +70,7 @@ export default function PostEditor() {
       if (!res.ok) throw new Error('저장에 실패했습니다.');
       
       const data = await res.json();
-      navigate(`/board/${data.id || id}`);
+      navigate(isAdminView ? '/admin' : `/board/${data.id || id}`);
     } catch (e) {
       setErrorMsg((e as Error).message);
     } finally {
@@ -161,7 +163,7 @@ export default function PostEditor() {
         <div className="flex justify-end gap-sm mt-sm">
           <button 
             type="button" 
-            onClick={() => navigate('/board')}
+            onClick={() => navigate(isAdminView ? '/admin' : '/board')}
             className="px-md py-sm bg-surface-container-low border border-outline-variant text-on-surface rounded font-label-md transition-colors hover:bg-surface-container"
           >
             취소

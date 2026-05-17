@@ -220,15 +220,20 @@ app.post('/api/auth/register', async (req, res) => {
       }
     }
 
+    const { rows: allUsers } = await pool.query('SELECT COUNT(*) as count FROM users');
+    const isFirstUser = parseInt(allUsers[0].count, 10) === 0;
+    const adminEmail = process.env.ADMIN_EMAIL;
+    const role = (isFirstUser || (adminEmail && email === adminEmail)) ? 'admin' : 'user';
+
     await pool.query(
-      'INSERT INTO users (id, email, name, password, is_email_verified) VALUES ($1, $2, $3, $4, true)',
-      [id, email, name, hashedPassword]
+      'INSERT INTO users (id, email, name, password, is_email_verified, role) VALUES ($1, $2, $3, $4, true, $5)',
+      [id, email, name, hashedPassword, role]
     );
 
     const token = jwt.sign({ userId: id, email }, JWT_SECRET, { expiresIn: '7d' });
     setAuthCookie(res, token);
 
-    res.json({ success: true, message: '가입 성공!', token, user: normalizeUser({ id, email, name }) });
+    res.json({ success: true, message: '가입 성공!', token, user: normalizeUser({ id, email, name, role }) });
   } catch (error: any) {
     console.error('Register error:', error);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -388,10 +393,15 @@ app.get('/auth/callback', async (req, res) => {
           WHERE id = $3
         `, [user.name, user.picture, user.id]);
       } else {
+        const { rows: allUsers } = await pool.query('SELECT COUNT(*) as count FROM users');
+        const isFirstUser = parseInt(allUsers[0].count, 10) === 0;
+        const adminEmail = process.env.ADMIN_EMAIL;
+        const role = (isFirstUser || (adminEmail && user.email === adminEmail)) ? 'admin' : 'user';
+
         await pool.query(`
-          INSERT INTO users (id, email, name, picture, is_email_verified) 
-          VALUES ($1, $2, $3, $4, true)
-        `, [user.id, user.email, user.name, user.picture]);
+          INSERT INTO users (id, email, name, picture, is_email_verified, role) 
+          VALUES ($1, $2, $3, $4, true, $5)
+        `, [user.id, user.email, user.name, user.picture, role]);
       }
     }
 
@@ -746,6 +756,37 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req: any, r
   } catch (e) {
     console.error('Failed to delete user:', e);
     res.status(500).json({ error: '사용자 삭제 실패: ' + (e as Error).message });
+  }
+});
+
+app.delete('/api/admin/users/bulk', requireAuth, requireAdmin, async (req: any, res: any) => {
+  const { userIds } = req.body;
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: '삭제할 사용자 ID 목록을 제공해야 합니다.' });
+  }
+
+  // Prevent admin from deleting themselves
+  const filteredIds = userIds.filter(id => id !== req.user.id);
+  if (filteredIds.length === 0) {
+    return res.status(400).json({ error: '자기 자신은 삭제할 수 없으며, 유효한 사용자가 없습니다.' });
+  }
+
+  try {
+    await initDbPromise;
+    if (!pool) throw new Error('Database pool not initialized');
+
+    console.log(`Admin ${req.user.email} is bulk deleting user IDs: ${filteredIds.join(', ')}`);
+
+    // 1. 사용자의 게시글 삭제
+    await pool.query('DELETE FROM posts WHERE author_id = ANY($1)', [filteredIds]);
+    // 2. 사용자 삭제
+    const result = await pool.query('DELETE FROM users WHERE id = ANY($1)', [filteredIds]);
+
+    console.log(`Successfully bulk deleted users. Rows affected: ${result.rowCount}`);
+    res.json({ success: true, deletedCount: result.rowCount });
+  } catch (e) {
+    console.error('Failed to bulk delete users:', e);
+    res.status(500).json({ error: '사용자 일괄 삭제 실패: ' + (e as Error).message });
   }
 });
 

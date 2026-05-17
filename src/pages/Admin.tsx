@@ -12,6 +12,7 @@ export default function Admin() {
   const [view, setView] = useState<'overview' | 'users' | 'posts'>('overview');
   const [confirmModal, setConfirmModal] = useState<{message: string, onConfirm: () => void} | null>(null);
   const [errorModal, setErrorModal] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== 'admin')) {
@@ -113,6 +114,44 @@ export default function Admin() {
           
           setUsers(users.filter(u => u.id !== userId));
           setStats(s => ({ ...s, usersCount: s.usersCount - 1 }));
+          setSelectedUserIds(selectedUserIds.filter(id => id !== userId));
+        } catch (e) {
+          setErrorModal((e as Error).message);
+        } finally {
+          setConfirmModal(null);
+        }
+      }
+    });
+  };
+
+  const handleBulkDeleteUsers = async () => {
+    if (selectedUserIds.length === 0) return;
+    
+    setConfirmModal({
+      message: `선택한 ${selectedUserIds.length}명의 사용자를 정말 삭제하시겠습니까?\n이들이 작성한 모든 게시글도 함께 삭제됩니다.`,
+      onConfirm: async () => {
+        try {
+          const res = await apiFetch(`/api/admin/users/bulk`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userIds: selectedUserIds })
+          });
+          
+          const text = await res.text();
+          if (!res.ok) {
+            let errorMsg = '일괄 삭제 실패';
+            try {
+              if (text) {
+                const data = JSON.parse(text);
+                errorMsg = data.error || errorMsg;
+              }
+            } catch (e) {}
+            throw new Error(errorMsg);
+          }
+          
+          setUsers(users.filter(u => !selectedUserIds.includes(u.id)));
+          setStats(s => ({ ...s, usersCount: s.usersCount - selectedUserIds.length }));
+          setSelectedUserIds([]);
         } catch (e) {
           setErrorModal((e as Error).message);
         } finally {
@@ -224,73 +263,140 @@ export default function Admin() {
             </section>
           </>
         ) : view === 'users' ? (
-          <section className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
-            <div className="p-sm bg-surface-container-low border-b border-outline-variant grid grid-cols-12 gap-sm font-label-md text-on-surface-variant">
-              <div className="col-span-4">사용자</div>
-              <div className="col-span-4">이메일</div>
-              <div className="col-span-2 text-center">권한</div>
-              <div className="col-span-2 text-center">관리</div>
+          <div className="flex flex-col gap-md">
+            <div className="flex justify-between items-center bg-surface-container-lowest border border-outline-variant p-sm rounded-xl">
+              <span className="font-body-md text-on-surface-variant pl-xs">
+                총 {users.length}명 중 {selectedUserIds.length}명 선택됨
+              </span>
+              <button
+                disabled={selectedUserIds.length === 0}
+                onClick={handleBulkDeleteUsers}
+                className="px-md py-sm rounded bg-error text-on-error hover:bg-error-container disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-label-md shrink-0 flex items-center gap-xs"
+              >
+                <span className="material-symbols-outlined text-[18px]">delete</span>
+                선택 삭제
+              </button>
             </div>
-            {users.map(u => (
-              <div key={u.id} className="p-sm border-b border-outline-variant grid grid-cols-12 gap-sm items-center font-body-sm text-on-surface hover:bg-surface-container-low">
-                <div className="col-span-4 flex items-center gap-xs">
-                  {u.picture ? <img src={u.picture} alt="" className="w-8 h-8 rounded-full" /> : <div className="w-8 h-8 bg-surface-variant rounded-full" />}
-                  {u.name}
+
+            <section className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
+              <div className="p-sm bg-surface-container-low border-b border-outline-variant grid grid-cols-12 gap-sm font-label-md text-on-surface-variant items-center">
+                <div className="col-span-1 text-center">
+                  <input 
+                    type="checkbox"
+                    checked={users.length > 0 && selectedUserIds.length === users.filter(u => u.id !== user?.id).length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedUserIds(users.filter(u => u.id !== user?.id).map(u => u.id));
+                      } else {
+                        setSelectedUserIds([]);
+                      }
+                    }}
+                    className="w-4 h-4 cursor-pointer"
+                  />
                 </div>
-                <div className="col-span-4 truncate">{u.email}</div>
-                <div className="col-span-2 text-center">
-                  <span className={`px-2 py-1 rounded font-label-sm ${u.role === 'admin' ? 'bg-error-container text-on-error-container' : 'bg-surface-variant text-on-surface'}`}>
-                    {u.role.toUpperCase()}
-                  </span>
-                </div>
-                <div className="col-span-2 text-center flex justify-center gap-sm">
-                  <button 
-                    onClick={() => handleRoleChange(u.id, u.role)}
-                    className="text-primary hover:underline text-xs"
-                  >
-                    {u.role === 'admin' ? '해제' : '지정'}
-                  </button>
-                  <button 
-                    onClick={() => handleDeleteUser(u.id, u.name)}
-                    className="text-error hover:underline text-xs"
-                  >
-                    삭제
-                  </button>
-                </div>
+                <div className="col-span-3">사용자</div>
+                <div className="col-span-4">이메일</div>
+                <div className="col-span-2 text-center">권한</div>
+                <div className="col-span-2 text-center">관리</div>
               </div>
-            ))}
-          </section>
+              {users.map(u => (
+                <div key={u.id} className="p-sm border-b border-outline-variant grid grid-cols-12 gap-sm items-center font-body-sm text-on-surface hover:bg-surface-container-low">
+                  <div className="col-span-1 text-center">
+                    <input 
+                      type="checkbox"
+                      disabled={u.id === user?.id}
+                      checked={selectedUserIds.includes(u.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedUserIds([...selectedUserIds, u.id]);
+                        } else {
+                          setSelectedUserIds(selectedUserIds.filter(id => id !== u.id));
+                        }
+                      }}
+                      className="w-4 h-4 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                  <div className="col-span-3 flex items-center gap-xs">
+                    {u.picture ? <img src={u.picture} alt="" className="w-8 h-8 rounded-full" /> : <div className="w-8 h-8 bg-surface-variant rounded-full" />}
+                    {u.name}
+                  </div>
+                  <div className="col-span-4 truncate">{u.email}</div>
+                  <div className="col-span-2 text-center">
+                    <span className={`px-2 py-1 rounded font-label-sm ${u.role === 'admin' ? 'bg-error-container text-on-error-container' : 'bg-surface-variant text-on-surface'}`}>
+                      {u.role.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="col-span-2 text-center flex justify-center gap-sm">
+                    <button 
+                      onClick={() => handleRoleChange(u.id, u.role)}
+                      className="text-primary hover:underline text-xs font-semibold"
+                    >
+                      {u.role === 'admin' ? '해제' : '지정'}
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteUser(u.id, u.name)}
+                      disabled={u.id === user?.id}
+                      className="text-error hover:underline text-xs disabled:opacity-30 disabled:no-underline font-semibold"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
+          </div>
         ) : (
-          <section className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
-            <div className="p-sm bg-surface-container-low border-b border-outline-variant grid grid-cols-12 gap-sm font-label-md text-on-surface-variant">
-              <div className="col-span-2">카테고리</div>
-              <div className="col-span-5">제목</div>
-              <div className="col-span-3">작성자</div>
-              <div className="col-span-2 text-center">관리</div>
+          <div className="flex flex-col gap-md">
+            <div className="flex justify-between items-center bg-surface-container-lowest border border-outline-variant p-sm rounded-xl">
+              <span className="font-body-md text-on-surface-variant pl-xs">총 {posts.length}개의 게시물</span>
+              <button
+                onClick={() => navigate('/board/new?admin=true')}
+                className="px-md py-sm rounded bg-primary text-on-primary hover:bg-primary-container hover:shadow-md transition-colors font-label-md shrink-0 flex items-center gap-xs"
+              >
+                <span className="material-symbols-outlined text-[18px]">add</span>
+                새 글 등록
+              </button>
             </div>
-            {posts.map(p => (
-              <div key={p.id} className="p-sm border-b border-outline-variant grid grid-cols-12 gap-sm items-center font-body-sm text-on-surface hover:bg-surface-container-low">
-                <div className="col-span-2">
-                  <span className="bg-surface-variant text-on-surface font-label-sm text-label-sm px-2 py-1 rounded">{p.type}</span>
-                </div>
-                <div className="col-span-5 truncate">{p.title}</div>
-                <div className="col-span-3 truncate">{p.author || '알 수 없음'}</div>
-                <div className="col-span-2 text-center">
-                  <button 
-                    onClick={() => handleDeletePost(p.id)}
-                    className="text-error hover:underline"
-                  >
-                    삭제
-                  </button>
-                </div>
+
+            <section className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
+              <div className="p-sm bg-surface-container-low border-b border-outline-variant grid grid-cols-12 gap-sm font-label-md text-on-surface-variant">
+                <div className="col-span-2">카테고리</div>
+                <div className="col-span-5">제목</div>
+                <div className="col-span-3">작성자</div>
+                <div className="col-span-2 text-center">관리</div>
               </div>
-            ))}
-            {posts.length === 0 && (
-              <div className="p-lg text-center font-body-md text-on-surface-variant">
-                게시물이 없습니다.
-              </div>
-            )}
-          </section>
+              {posts.map(p => (
+                <div key={p.id} className="p-sm border-b border-outline-variant grid grid-cols-12 gap-sm items-center font-body-sm text-on-surface hover:bg-surface-container-low">
+                  <div className="col-span-2">
+                    <span className="bg-surface-variant text-on-surface font-label-sm text-label-sm px-2 py-1 rounded">{p.type}</span>
+                  </div>
+                  <div className="col-span-5 truncate">
+                    <a href={`/board/${p.id}`} className="hover:underline text-primary font-semibold">{p.title}</a>
+                  </div>
+                  <div className="col-span-3 truncate">{p.author || '알 수 없음'}</div>
+                  <div className="col-span-2 text-center flex justify-center gap-sm">
+                    <button 
+                      onClick={() => navigate(`/board/edit/${p.id}?admin=true`)}
+                      className="text-primary hover:underline text-xs font-semibold"
+                    >
+                      수정
+                    </button>
+                    <button 
+                      onClick={() => handleDeletePost(p.id)}
+                      className="text-error hover:underline text-xs font-semibold"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {posts.length === 0 && (
+                <div className="p-lg text-center font-body-md text-on-surface-variant">
+                  게시물이 없습니다.
+                </div>
+              )}
+            </section>
+          </div>
         )}
       </div>
     </main>
