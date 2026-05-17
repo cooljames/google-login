@@ -451,11 +451,20 @@ async function requireAuth(req: any, res: any, next: any) {
     }
     await initDbPromise;
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
-    const user = rows[0];
+    let user = rows[0];
     if (!user) {
       console.warn(`requireAuth: User not found for ID ${decoded.userId}`);
       return res.status(401).json({ error: 'User not found' });
     }
+
+    // Dynamic admin promotion if user email matches ADMIN_EMAIL
+    const adminEmail = process.env.ADMIN_EMAIL;
+    if (adminEmail && user.email === adminEmail && user.role !== 'admin') {
+      console.log(`[requireAuth] Promoting user ${user.email} to admin dynamically.`);
+      await pool.query("UPDATE users SET role = 'admin' WHERE id = $1", [user.id]);
+      user.role = 'admin';
+    }
+
     req.user = user;
     next();
   } catch (err) {
@@ -481,10 +490,17 @@ app.get('/api/me', async (req: any, res: any) => {
     if (!pool) return res.status(500).json({ error: 'Database not initialized' });
 
     await initDbPromise;
-    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
-    const user = rows[0];
+    let user = rows[0];
 
     if (!user) return res.json(null);
+
+    // Dynamic admin promotion if user email matches ADMIN_EMAIL
+    const adminEmail = process.env.ADMIN_EMAIL;
+    if (adminEmail && user.email === adminEmail && user.role !== 'admin') {
+      console.log(`[/api/me] Promoting user ${user.email} to admin dynamically.`);
+      await pool.query("UPDATE users SET role = 'admin' WHERE id = $1", [user.id]);
+      user.role = 'admin';
+    }
 
     res.json(normalizeUser(user));
   } catch (err) {
