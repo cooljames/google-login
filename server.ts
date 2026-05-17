@@ -241,9 +241,10 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 function setAuthCookie(res: any, token: string) {
+  const isProd = !!process.env.VERCEL || process.env.NODE_ENV === 'production';
   res.cookie('auth_token', token, {
-    secure: true,
-    sameSite: 'none',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/'
@@ -490,6 +491,7 @@ app.get('/api/me', async (req: any, res: any) => {
     if (!pool) return res.status(500).json({ error: 'Database not initialized' });
 
     await initDbPromise;
+    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
     let user = rows[0];
 
     if (!user) return res.json(null);
@@ -535,10 +537,12 @@ app.put('/api/me', requireAuth, upload.single('picture'), async (req: any, res: 
 });
 
 app.post('/api/logout', (req, res) => {
+  const isProd = !!process.env.VERCEL || process.env.NODE_ENV === 'production';
   res.clearCookie('auth_token', {
-    secure: true,
-    sameSite: 'none',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     httpOnly: true,
+    path: '/'
   });
   res.json({ success: true });
 });
