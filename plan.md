@@ -1,7 +1,7 @@
-# 프로젝트 구현 계획: 한글 플랫폼 (SQLite 기반)
+# 프로젝트 구현 계획: 구글 로그인 게시판 (SQLite 기반)
 
 ## 1. 개요
-현재 서버 메모리(MOCK_USERS, MOCK_POSTS)로 작동 중인 '한글 플랫폼' 앱을 **SQLite 데이터베이스** 기반 풀스택 구조로 전환하여 데이터를 영구적으로 보존하고, 게시판 CRUD 및 관리자(Admin) 기능을 실제 작동하도록 구현합니다.
+현재 서버 메모리(MOCK_USERS, MOCK_POSTS)로 작동 중인 '구글 로그인 게시판' 앱을 **SQLite 데이터베이스** 기반 풀스택 구조로 전환하여 데이터를 영구적으로 보존하고, 게시판 CRUD 및 관리자(Admin) 기능을 실제 작동하도록 구현합니다.
 
 ## 2. 기술 스택 (Option B: SQLite)
 - **Frontend**: React, React Router, Tailwind CSS

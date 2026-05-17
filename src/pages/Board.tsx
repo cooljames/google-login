@@ -8,22 +8,53 @@ export default function Board() {
   const navigate = useNavigate();
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
 
   useEffect(() => {
-    apiFetch('/api/posts')
+    setLoading(true);
+    apiFetch(`/api/posts?page=${currentPage}&limit=${limit}&q=${encodeURIComponent(searchQuery)}`)
       .then(async r => {
         const text = await r.text();
-        return text ? JSON.parse(text) : [];
+        return text ? JSON.parse(text) : { items: [], pagination: { totalPages: 1 } };
       })
       .then(data => {
-        setPosts(data);
+        if (Array.isArray(data)) {
+          setPosts(data);
+        } else {
+          setPosts(data.items || []);
+          setTotalPages(data.pagination?.totalPages || 1);
+        }
         setLoading(false);
       })
       .catch(err => {
         console.error('Board fetch error:', err);
         setLoading(false);
       });
-  }, []);
+  }, [currentPage, limit, searchQuery]);
+
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const getPageNumbers = () => {
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+    let endPage = startPage + maxVisiblePages - 1;
+    if (endPage > totalPages) {
+      endPage = totalPages;
+      startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+    const pages = [];
+    for (let i = startPage; i <= endPage; i++) pages.push(i);
+    return pages;
+  };
 
   return (
     <main className="flex-grow w-full max-w-[1200px] mx-auto px-margin-mobile md:px-margin-desktop py-lg">
@@ -32,19 +63,53 @@ export default function Board() {
           <h1 className="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mb-base">공지사항 및 게시판</h1>
           <p className="font-body-md text-body-md text-on-surface-variant">새로운 소식과 다양한 정보를 확인하세요.</p>
         </div>
-        <button 
-          className="bg-primary text-on-primary font-label-md text-label-md px-md py-[12px] rounded hover:bg-primary-container transition-colors w-full md:w-auto flex items-center justify-center gap-xs"
-          onClick={() => {
-            if (user) {
-              navigate('/board/new');
-            } else {
-              navigate('/auth');
-            }
-          }}
-        >
-          <span className="material-symbols-outlined text-[18px]">add</span>
-          새 글 쓰기
-        </button>
+        <div className="flex flex-col sm:flex-row items-center gap-sm w-full md:w-auto">
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              setSearchQuery(searchInput);
+              setCurrentPage(1);
+            }}
+            className="relative w-full sm:w-auto"
+          >
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px]">search</span>
+            <input 
+              type="text" 
+              placeholder="게시물 검색..." 
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="pl-10 pr-4 h-[42px] bg-surface-container-lowest border border-outline-variant rounded focus:border-primary focus:ring-1 focus:ring-primary font-body-sm text-body-sm text-on-surface w-full sm:w-48 placeholder:text-outline transition-colors outline-none" 
+            />
+          </form>
+          <div className="flex flex-row items-center gap-sm w-full sm:w-auto">
+            <select 
+              value={limit}
+              onChange={(e) => {
+                setLimit(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="bg-surface-container-lowest text-on-surface border border-outline-variant font-label-md text-label-md px-3 h-[42px] rounded focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary flex-grow sm:flex-grow-0"
+            >
+              <option value={10}>10개씩 보기</option>
+              <option value={20}>20개씩 보기</option>
+              <option value={30}>30개씩 보기</option>
+              <option value={9999}>전체 보기</option>
+            </select>
+            <button 
+              className="bg-primary text-on-primary font-label-md text-label-md px-md h-[42px] rounded hover:bg-primary-container transition-colors flex-grow sm:flex-grow-0 flex items-center justify-center gap-xs"
+              onClick={() => {
+                if (user) {
+                  navigate('/board/new');
+                } else {
+                  navigate('/auth');
+                }
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px]">add</span>
+              새 글 쓰기
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden">
@@ -83,17 +148,35 @@ export default function Board() {
         </div>
       </div>
       
-      <div className="flex justify-center mt-lg gap-xs">
-        <button className="p-xs text-on-surface-variant border border-outline-variant rounded hover:bg-surface-container-low transition-colors flex items-center justify-center">
-          <span className="material-symbols-outlined text-[20px]">chevron_left</span>
-        </button>
-        <button className="w-[36px] h-[36px] bg-primary text-on-primary font-label-md text-label-md rounded flex items-center justify-center">1</button>
-        <button className="w-[36px] h-[36px] text-on-surface border border-transparent hover:bg-surface-container-low font-label-md text-label-md rounded flex items-center justify-center transition-colors">2</button>
-        <button className="w-[36px] h-[36px] text-on-surface border border-transparent hover:bg-surface-container-low font-label-md text-label-md rounded flex items-center justify-center transition-colors">3</button>
-        <button className="p-xs text-on-surface-variant border border-outline-variant rounded hover:bg-surface-container-low transition-colors flex items-center justify-center">
-          <span className="material-symbols-outlined text-[20px]">chevron_right</span>
-        </button>
-      </div>
+      {totalPages > 1 && (
+        <div className="flex justify-center mt-lg gap-xs">
+          <button 
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="p-xs text-on-surface-variant border border-outline-variant rounded hover:bg-surface-container-low transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-[20px]">chevron_left</span>
+          </button>
+          
+          {getPageNumbers().map(pageNum => (
+            <button 
+              key={pageNum}
+              onClick={() => goToPage(pageNum)}
+              className={`w-[36px] h-[36px] rounded flex items-center justify-center font-label-md text-label-md transition-colors ${pageNum === currentPage ? 'bg-primary text-on-primary' : 'text-on-surface border border-transparent hover:bg-surface-container-low'}`}
+            >
+              {pageNum}
+            </button>
+          ))}
+
+          <button 
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            className="p-xs text-on-surface-variant border border-outline-variant rounded hover:bg-surface-container-low transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-[20px]">chevron_right</span>
+          </button>
+        </div>
+      )}
     </main>
   );
 }

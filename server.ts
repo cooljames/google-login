@@ -3,6 +3,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import path from 'path';
+import fs from 'fs';
 
 import multer from 'multer';
 import { put } from '@vercel/blob';
@@ -16,6 +17,7 @@ const { Pool } = pg;
 
 // Replace local diskStorage with memoryStorage for Vercel Blob
 const upload = multer({ storage: multer.memoryStorage() });
+const safeUpload = (req, res, next) => { upload.single('attachment')(req, res, (err) => { if (err) { const errorMsg = 'Multer Error: ' + (err.stack || err) + '\n'; console.error(errorMsg); fs.appendFileSync('debug.log', errorMsg); return res.status(500).json({ error: '파일 파싱 에러(Multer)', details: err.message }); } next(); }); };
 
 const app = express();
 const PORT = 3000;
@@ -39,7 +41,7 @@ if (process.env.DATABASE_URL) {
     idleTimeoutMillis: 500, // aggressive idle timeout for serverless
     max: 10
   });
-  
+
   pool.on('error', (err) => {
     console.error('Unexpected error on idle database client', err);
   });
@@ -77,13 +79,13 @@ const getTransporter = async () => {
 
 const initDb = async () => {
   if (!pool) return;
-  
+
   if (process.env.VERCEL) {
     // In Vercel, schema migrations are discouraged from running on every request.
     // Assuming DB is already migrated.
     return;
   }
-  
+
   const queries = [
     `CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -178,9 +180,9 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Basic health check
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    db: !!pool, 
+  res.json({
+    status: 'ok',
+    db: !!pool,
     googleConfig: !!GOOGLE_CLIENT_ID,
     env: process.env.NODE_ENV,
     vercel: !!process.env.VERCEL
@@ -200,7 +202,7 @@ app.post('/api/auth/register', async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     const id = 'user_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
-    
+
     // Check if email already exists (could be a Google user)
     const { rows: existing } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (existing.length > 0) {
@@ -253,7 +255,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     const user = rows[0];
-    
+
     if (!user || !user.password) {
       return res.status(401).json({ error: '가입되지 않은 이메일이거나 소셜 로그인 계정입니다.' });
     }
@@ -266,10 +268,10 @@ app.post('/api/auth/login', async (req, res) => {
     const sessionToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
     setAuthCookie(res, sessionToken);
 
-    res.json({ 
-      success: true, 
-      token: sessionToken, 
-      user: normalizeUser(user) 
+    res.json({
+      success: true,
+      token: sessionToken,
+      user: normalizeUser(user)
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -282,7 +284,7 @@ app.get('/api/auth/url', async (req, res) => {
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const proto = req.headers['x-forwarded-proto'] || 'http';
   let origin = req.query.origin as string;
-  
+
   // Always use the real host if available, as it's the most reliable source of truth
   // and prevents Vercel rewrite issues from falling back to localhost.
   if (host) {
@@ -321,7 +323,7 @@ app.get('/api/auth/url', async (req, res) => {
 app.get('/auth/callback', async (req, res) => {
   await initDbPromise;
   const { code, state } = req.query;
-  
+
   if (!code) {
     return res.send(`<html><body><p>No code provided.</p></body></html>`);
   }
@@ -330,7 +332,7 @@ app.get('/auth/callback', async (req, res) => {
   // Use host header as the absolute source of truth for targetOrigin fallback
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const proto = req.headers['x-forwarded-proto'] || 'http';
-  
+
   let redirectUri = '';
   let targetOrigin = host ? `${proto}://${host}` : (process.env.APP_URL || `http://localhost:${PORT}`);
   try {
@@ -364,9 +366,9 @@ app.get('/auth/callback', async (req, res) => {
 
     const tokenData = await tokenResponse.json();
     if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
-    
+
     const userInfoData = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
-    
+
     const user = {
       id: userInfoData.sub,
       email: userInfoData.email,
@@ -467,13 +469,13 @@ app.get('/api/me', async (req: any, res: any) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     if (!pool) return res.status(500).json({ error: 'Database not initialized' });
-    
+
     await initDbPromise;
     const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
     const user = rows[0];
-    
+
     if (!user) return res.json(null);
-    
+
     res.json(normalizeUser(user));
   } catch (err) {
     res.json(null);
@@ -483,7 +485,7 @@ app.get('/api/me', async (req: any, res: any) => {
 app.put('/api/me', requireAuth, upload.single('picture'), async (req: any, res: any) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required' });
-  
+
   if (!pool) return res.status(500).json({ error: 'Database not initialized' });
 
   let picture = req.user.picture;
@@ -521,19 +523,38 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/posts', async (req, res) => {
   await initDbPromise;
   if (!pool) return res.status(500).json({ error: 'Database not initialized' });
-  const { rows } = await pool.query(`
-    SELECT p.*, u.name as author_name, u.picture as author_picture
-    FROM posts p 
-    LEFT JOIN users u ON p.author_id = u.id 
-    ORDER BY p.id DESC
-  `);
-  res.json(rows.map(normalizePost));
+
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const offset = (page - 1) * limit;
+
+  try {
+    const countResult = await pool.query('SELECT COUNT(*) FROM posts');
+    const totalCount = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(totalCount / limit) || 1;
+
+    const { rows } = await pool.query(`
+      SELECT p.*, u.name as author_name, u.picture as author_picture
+      FROM posts p 
+      LEFT JOIN users u ON p.author_id = u.id 
+      ORDER BY p.id DESC
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
+
+    res.json({
+      items: rows.map(normalizePost),
+      pagination: { totalCount, totalPages, page, limit }
+    });
+  } catch (err) {
+    console.error('Fetch posts error:', err);
+    res.status(500).json({ error: 'Failed to fetch posts' });
+  }
 });
 
 app.get('/api/posts/:id', async (req, res) => {
   const { id } = req.params;
   if (!pool) return res.status(500).json({ error: 'Database not initialized' });
-  
+
   try {
     await pool.query('UPDATE posts SET views = views + 1 WHERE id = $1', [id]);
     const { rows } = await pool.query(`
@@ -542,7 +563,7 @@ app.get('/api/posts/:id', async (req, res) => {
       LEFT JOIN users u ON p.author_id = u.id 
       WHERE p.id = $1
     `, [id]);
-    
+
     if (rows.length === 0) return res.status(404).json({ error: 'Post not found' });
     res.json(normalizePost(rows[0]));
   } catch (err) {
@@ -550,7 +571,8 @@ app.get('/api/posts/:id', async (req, res) => {
   }
 });
 
-app.post('/api/posts', requireAuth, upload.single('attachment'), async (req: any, res: any) => {
+app.post('/api/posts', requireAuth, safeUpload, async (req: any, res: any) => {
+  console.log('POST /api/posts hit', { body: req.body, hasFile: !!req.file });
   const { title, content, type = '일반' } = req.body;
   if (!title) return res.status(400).json({ error: 'Title required' });
 
@@ -559,10 +581,12 @@ app.post('/api/posts', requireAuth, upload.single('attachment'), async (req: any
   let attachment_name = null;
   let attachment_url = null;
   if (req.file) {
+    console.log('Uploading file to Vercel Blob:', req.file.originalname);
     try {
       const decodedName = decodeFileName(req.file.originalname);
       const blob = await put(decodedName, req.file.buffer, {
         access: 'public',
+        addRandomSuffix: true,
         token: process.env.BLOB_READ_WRITE_TOKEN
       });
       attachment_name = decodedName;
@@ -576,40 +600,47 @@ app.post('/api/posts', requireAuth, upload.single('attachment'), async (req: any
     }
   }
 
-  const result = await pool.query(
-    'INSERT INTO posts (title, content, type, author_id, attachment_name, attachment_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-    [title, content || '', type, req.user.id, attachment_name, attachment_url]
-  );
-  const newPostId = result.rows[0].id;
-  
-  const { rows } = await pool.query(`
-    SELECT p.*, u.name as author_name
-    FROM posts p 
-    LEFT JOIN users u ON p.author_id = u.id 
-    WHERE p.id = $1
-  `, [newPostId]);
-  
-  res.json(normalizePost(rows[0]));
+  try {
+    const result = await pool.query(
+      'INSERT INTO posts (title, content, type, author_id, attachment_name, attachment_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [title, content || '', type, req.user.id, attachment_name, attachment_url]
+    );
+    const newPostId = result.rows[0].id;
+
+    const { rows } = await pool.query(`
+      SELECT p.*, u.name as author_name
+      FROM posts p 
+      LEFT JOIN users u ON p.author_id = u.id 
+      WHERE p.id = $1
+    `, [newPostId]);
+
+    res.json(normalizePost(rows[0]));
+  } catch (err: any) {
+    const errorMsg = 'Failed to create post: ' + err.stack + '\n';
+    console.error(errorMsg);
+    fs.appendFileSync('debug.log', errorMsg);
+    res.status(500).json({ error: 'Failed to create post', details: err.message });
+  }
 });
 
-app.put('/api/posts/:id', requireAuth, upload.single('attachment'), async (req: any, res: any) => {
+app.put('/api/posts/:id', requireAuth, safeUpload, async (req: any, res: any) => {
   const { id } = req.params;
   const { title, content, type } = req.body;
   const remove_attachment = req.body.remove_attachment === 'true';
-  
+
   if (!pool) return res.status(500).json({ error: 'Database not initialized' });
 
   const { rows: postRows } = await pool.query('SELECT * FROM posts WHERE id = $1', [id]);
   const post = postRows[0];
   if (!post) return res.status(404).json({ error: 'Post not found' });
-  
+
   if (post.author_id !== req.user.id && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  
+
   let attachment_name = post.attachment_name;
   let attachment_url = post.attachment_url;
-  
+
   if (remove_attachment) {
     attachment_name = null;
     attachment_url = null;
@@ -618,6 +649,7 @@ app.put('/api/posts/:id', requireAuth, upload.single('attachment'), async (req: 
       const decodedName = decodeFileName(req.file.originalname);
       const blob = await put(decodedName, req.file.buffer, {
         access: 'public',
+        addRandomSuffix: true,
         token: process.env.BLOB_READ_WRITE_TOKEN
       });
       attachment_name = decodedName;
@@ -630,33 +662,33 @@ app.put('/api/posts/:id', requireAuth, upload.single('attachment'), async (req: 
       return res.status(500).json({ error: 'Failed to upload attachment' });
     }
   }
-  
+
   await pool.query(
     'UPDATE posts SET title = $1, content = $2, type = $3, attachment_name = $4, attachment_url = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6',
     [title || post.title, content || post.content, type || post.type, attachment_name, attachment_url, id]
   );
-  
+
   const { rows: updatedRows } = await pool.query(`
     SELECT p.*, u.name as author_name
     FROM posts p 
     LEFT JOIN users u ON p.author_id = u.id 
     WHERE p.id = $1
   `, [id]);
-  
+
   res.json(normalizePost(updatedRows[0]));
 });
 
 app.delete('/api/posts/:id', requireAuth, async (req: any, res: any) => {
   const { id } = req.params;
-  
+
   const { rows } = await pool.query('SELECT * FROM posts WHERE id = $1', [id]);
   const post = rows[0];
   if (!post) return res.status(404).json({ error: 'Post not found' });
-  
+
   if (post.author_id !== req.user.id && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  
+
   await pool.query('DELETE FROM posts WHERE id = $1', [id]);
   res.json({ success: true });
 });
@@ -668,11 +700,11 @@ app.get('/api/admin/stats', requireAuth, requireAdmin, async (req, res) => {
   const usersRes = await pool.query('SELECT COUNT(*) as count FROM users');
   const postsRes = await pool.query('SELECT COUNT(*) as count FROM posts');
   const adminRes = await pool.query("SELECT COUNT(*) as count FROM users WHERE role = 'admin'");
-  
-  res.json({ 
-    usersCount: parseInt(usersRes.rows[0].count), 
-    postsCount: parseInt(postsRes.rows[0].count), 
-    adminCount: parseInt(adminRes.rows[0].count) 
+
+  res.json({
+    usersCount: parseInt(usersRes.rows[0].count),
+    postsCount: parseInt(postsRes.rows[0].count),
+    adminCount: parseInt(adminRes.rows[0].count)
   });
 });
 
@@ -685,7 +717,7 @@ app.put('/api/admin/users/:id/role', requireAuth, requireAdmin, async (req, res)
   const { id } = req.params;
   const { role } = req.body;
   if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
-  
+
   await pool.query('UPDATE users SET role = $1 WHERE id = $2', [role, id]);
   res.json({ success: true });
 });
@@ -693,7 +725,7 @@ app.put('/api/admin/users/:id/role', requireAuth, requireAdmin, async (req, res)
 app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req: any, res: any) => {
   console.log('DELETE /api/admin/users/:id HIT!', req.params.id);
   const { id } = req.params;
-  
+
   if (req.user.id === id) {
     return res.status(400).json({ error: '자기 자신은 삭제할 수 없습니다.' });
   }
@@ -703,12 +735,12 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req: any, r
     if (!pool) throw new Error('Database pool not initialized');
 
     console.log(`Admin ${req.user.email} is deleting user ID: ${id}`);
-    
+
     // 1. 사용자의 게시글 삭제
     await pool.query('DELETE FROM posts WHERE author_id = $1', [id]);
     // 2. 사용자 삭제
     const result = await pool.query('DELETE FROM users WHERE id = $1', [id]);
-    
+
     console.log(`Successfully deleted user ${id}. Rows affected: ${result.rowCount}`);
     res.json({ success: true });
   } catch (e) {
@@ -738,7 +770,9 @@ async function startServer() {
       });
     }
 
-    app.listen(PORT, '0.0.0.0', () => {
+    app.use((err, req, res, next) => { fs.appendFileSync('debug.log', 'Global Error: ' + (err.stack || err) + '\n'); res.status(500).json({ error: 'Internal Server Error' }); });
+
+app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
   }

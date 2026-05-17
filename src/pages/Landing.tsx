@@ -18,7 +18,7 @@ export default function Landing() {
         <div className="flex justify-between items-center w-full px-margin-mobile md:px-margin-desktop h-16 max-w-[1200px] mx-auto">
           <div className="font-headline-sm text-headline-sm font-bold text-primary flex items-center gap-xs">
             <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>widgets</span>
-            한글 플랫폼
+            구글 로그인 게시판
           </div>
           <nav className="hidden md:flex gap-sm">
             <Link to="/board" className="font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-low transition-colors px-xs py-base rounded">게시판</Link>
@@ -46,9 +46,9 @@ export default function Landing() {
                 불필요한 기능은 모두 덜어내고, 오직 당신의 목표 달성에만 집중할 수 있는 깨끗한 환경을 제공합니다. 지금 바로 시작해보세요.
               </p>
             </div>
-            
-            <button 
-              onClick={login} 
+
+            <button
+              onClick={login}
               className="mt-xs md:mt-sm px-xl py-[14px] bg-primary text-on-primary font-label-md text-[15px] rounded-DEFAULT hover:bg-primary-container hover:shadow-md transition-all active:scale-95 flex items-center justify-center gap-xs"
             >
               무료로 시작하기
@@ -59,9 +59,9 @@ export default function Landing() {
           {/* Hero Image */}
           <div className="order-1 lg:order-2 w-full relative">
             <div className="aspect-[4/3] lg:aspect-square w-full rounded-2xl overflow-hidden shadow-lg border border-outline-variant relative">
-              <img 
-                src="https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&q=80&w=1200" 
-                alt="Clean Minimalist Workspace" 
+              <img
+                src="https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&q=80&w=1200"
+                alt="Clean Minimalist Workspace"
                 className="w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-surface-container-lowest/5 mix-blend-overlay"></div>
@@ -73,8 +73,8 @@ export default function Landing() {
       <footer className="w-full mt-auto bg-surface border-t border-outline-variant py-[32px]">
         <div className="flex flex-col md:flex-row justify-between items-center px-margin-mobile md:px-margin-desktop max-w-[1200px] mx-auto gap-[16px] md:gap-0">
           <div className="flex flex-col items-center md:items-start gap-1">
-            <span className="font-label-md text-label-md font-bold text-on-surface tracking-tight">한글 플랫폼</span>
-            <span className="font-body-sm text-body-sm text-outline">© 2024 한글 플랫폼. All rights reserved.</span>
+            <span className="font-label-md text-label-md font-bold text-on-surface tracking-tight">구글 로그인 게시판</span>
+            <span className="font-body-sm text-body-sm text-outline">© 2024 구글 로그인 게시판. All rights reserved.</span>
           </div>
           <nav className="flex flex-wrap justify-center gap-[24px]">
             <a href="#" className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary transition-opacity duration-200">이용약관</a>

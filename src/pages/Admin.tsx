@@ -42,12 +42,12 @@ export default function Admin() {
 
   useEffect(() => {
     if (user?.role === 'admin' && view === 'posts') {
-      apiFetch('/api/posts')
+      apiFetch('/api/posts?limit=100')
         .then(async r => {
           const text = await r.text();
-          return text ? JSON.parse(text) : [];
+          return text ? JSON.parse(text) : { items: [] };
         })
-        .then(setPosts)
+        .then(data => setPosts(Array.isArray(data) ? data : (data.items || [])))
         .catch(console.error);
     }
   }, [user, view]);
