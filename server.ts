@@ -519,21 +519,33 @@ app.put('/api/me', requireAuth, upload.single('picture'), async (req: any, res: 
   let picture = req.user.picture;
   if (req.file) {
     try {
+      console.log('Uploading profile picture to Vercel Blob:', req.file.originalname);
       const decodedName = decodeFileName(req.file.originalname);
       const blob = await put(decodedName, req.file.buffer, {
         access: 'public',
+        addRandomSuffix: true,
         token: process.env.BLOB_READ_WRITE_TOKEN
       });
       picture = blob.url;
-    } catch (e) {
-      console.error('Failed to upload profile picture to Blob:', e);
-      return res.status(500).json({ error: 'Failed to upload profile picture' });
+      console.log('Successfully uploaded profile picture:', picture);
+    } catch (e: any) {
+      const errorMsg = 'Failed to upload profile picture to Blob: ' + (e.stack || e) + '\n';
+      console.error(errorMsg);
+      fs.appendFileSync('debug.log', errorMsg);
+      return res.status(500).json({ error: 'Failed to upload profile picture', details: e.message });
     }
   }
 
-  await pool.query('UPDATE users SET name = $1, picture = $2 WHERE id = $3', [name, picture, req.user.id]);
-  const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
-  res.json(normalizeUser(rows[0]));
+  try {
+    await pool.query('UPDATE users SET name = $1, picture = $2 WHERE id = $3', [name, picture, req.user.id]);
+    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    res.json(normalizeUser(rows[0]));
+  } catch (err: any) {
+    const errorMsg = 'Failed to update user database profile: ' + (err.stack || err) + '\n';
+    console.error(errorMsg);
+    fs.appendFileSync('debug.log', errorMsg);
+    res.status(500).json({ error: 'Failed to update profile database', details: err.message });
+  }
 });
 
 app.post('/api/logout', (req, res) => {
