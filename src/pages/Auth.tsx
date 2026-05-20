@@ -3,7 +3,7 @@ import { useAuth } from '../components/AuthContext';
 import { useNavigate, Navigate } from 'react-router-dom';
 
 export default function Auth() {
-  const { user, loginWithGoogle, loginWithEmail, registerWithEmail } = useAuth();
+  const { user, loginWithGoogle, loginWithNaver, loginWithKakao, loginWithEmail, registerWithEmail } = useAuth();
   const navigate = useNavigate();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
@@ -122,14 +122,14 @@ export default function Auth() {
             </div>
           </div>
 
-          <div className="mt-6">
+          <div className="mt-6 space-y-3">
             <button
               type="button"
               onClick={async () => {
                 const err = await loginWithGoogle();
                 if (err) setError(err);
               }}
-              className="w-full flex items-center justify-center gap-3 py-2 px-4 border border-outline-variant rounded-md shadow-sm bg-surface text-sm font-medium text-on-surface hover:bg-surface-container-low focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors"
+              className="w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-outline-variant rounded-md shadow-sm bg-surface text-sm font-semibold text-on-surface hover:bg-surface-container-low active:scale-[0.98] transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary cursor-pointer"
             >
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M17.64 9.20455C17.64 8.56636 17.5827 7.95273 17.4764 7.36365H9V10.845H13.8436C13.635 11.97 13.0009 12.9232 12.0477 13.5614V15.8195H14.9564C16.6582 14.2527 17.64 11.9455 17.64 9.20455Z" fill="#4285F4"/>
@@ -138,6 +138,34 @@ export default function Auth() {
                 <path d="M9 3.57955C10.3214 3.57955 11.5077 4.03364 12.4405 4.92545L15.0218 2.34409C13.4632 0.891818 11.4259 0 9 0C5.48182 0 2.43818 2.01682 0.957275 4.95818L3.96409 7.29C4.67182 5.16273 6.65591 3.57955 9 3.57955Z" fill="#EA4335"/>
               </svg>
               Google로 시작하기
+            </button>
+
+            <button
+              type="button"
+              onClick={async () => {
+                const err = await loginWithNaver();
+                if (err) setError(err);
+              }}
+              className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-md shadow-sm bg-[#03C75A] text-sm font-semibold text-white hover:bg-[#02b34f] active:scale-[0.98] transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#03C75A] cursor-pointer"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M16.2 4H20v16h-3.8l-8.4-12V20H4V4h3.8l8.4 12V4z"/>
+              </svg>
+              네이버로 시작하기
+            </button>
+
+            <button
+              type="button"
+              onClick={async () => {
+                const err = await loginWithKakao();
+                if (err) setError(err);
+              }}
+              className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-md shadow-sm bg-[#FEE500] text-sm font-semibold text-[#191919] hover:bg-[#Fada0a] active:scale-[0.98] transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#FEE500] cursor-pointer"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 3c-4.97 0-9 3.185-9 7.115 0 2.557 1.707 4.8 4.316 6.077-.18.665-.65 2.409-.743 2.785-.117.473.175.467.368.34.152-.098 2.42-1.643 3.4-2.31.543.082 1.1.123 1.659.123 4.97 0 9-3.186 9-7.115C21 6.185 16.97 3 12 3z"/>
+              </svg>
+              카카오로 시작하기
             </button>
           </div>
         </div>

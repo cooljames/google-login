@@ -28,6 +28,10 @@ app.use(cookieParser());
 const JWT_SECRET = process.env.JWT_SECRET || 'DEV_SECRET_KEY_CHANGE_IN_PROD';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID || '';
+const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET || '';
+const KAKAO_CLIENT_ID = process.env.KAKAO_CLIENT_ID || '';
+const KAKAO_CLIENT_SECRET = process.env.KAKAO_CLIENT_SECRET || '';
 
 // Global pool instance
 let pool: pg.Pool;
@@ -290,6 +294,7 @@ app.get('/api/auth/url', async (req, res) => {
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const proto = req.headers['x-forwarded-proto'] || 'http';
   let origin = req.query.origin as string;
+  const provider = (req.query.provider as string) || 'google';
 
   // Always use the real host if available, as it's the most reliable source of truth
   // and prevents Vercel rewrite issues from falling back to localhost.
@@ -308,23 +313,131 @@ app.get('/api/auth/url', async (req, res) => {
   }
   const redirectUri = `${origin}/auth/callback`;
 
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    return res.status(500).json({ error: 'OAuth is not fully configured. Please supply both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the environment variables.' });
+  const state = Buffer.from(JSON.stringify({ redirectUri, provider })).toString('base64');
+
+  if (provider === 'google') {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      return res.status(500).json({ error: 'OAuth is not fully configured. Please supply both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the environment variables.' });
+    }
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri as string,
+      response_type: 'code',
+      scope: 'openid email profile',
+      prompt: 'select_account',
+      state
+    });
+    return res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
+  } else if (provider === 'naver') {
+    if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
+      if (process.env.NODE_ENV !== 'production') {
+        const params = new URLSearchParams({ provider, state: state as string });
+        return res.json({ url: `/api/auth/mock-login?${params}` });
+      }
+      return res.status(500).json({ error: 'Naver OAuth is not fully configured. Please supply both NAVER_CLIENT_ID and NAVER_CLIENT_SECRET in the environment variables.' });
+    }
+    const params = new URLSearchParams({
+      client_id: NAVER_CLIENT_ID,
+      redirect_uri: redirectUri as string,
+      response_type: 'code',
+      state
+    });
+    return res.json({ url: `https://nid.naver.com/oauth2.0/authorize?${params}` });
+  } else if (provider === 'kakao') {
+    if (!KAKAO_CLIENT_ID) {
+      if (process.env.NODE_ENV !== 'production') {
+        const params = new URLSearchParams({ provider, state: state as string });
+        return res.json({ url: `/api/auth/mock-login?${params}` });
+      }
+      return res.status(500).json({ error: 'Kakao OAuth is not fully configured. Please supply KAKAO_CLIENT_ID in the environment variables.' });
+    }
+    const params = new URLSearchParams({
+      client_id: KAKAO_CLIENT_ID,
+      redirect_uri: redirectUri as string,
+      response_type: 'code',
+      state
+    });
+    return res.json({ url: `https://kauth.kakao.com/oauth/authorize?${params}` });
+  } else {
+    return res.status(400).json({ error: 'Unsupported provider' });
   }
-
-  const state = Buffer.from(JSON.stringify({ redirectUri })).toString('base64');
-
-  const params = new URLSearchParams({
-    client_id: GOOGLE_CLIENT_ID,
-    redirect_uri: redirectUri as string,
-    response_type: 'code',
-    scope: 'openid email profile',
-    prompt: 'select_account',
-    state
-  });
-
-  res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
 });
+
+app.get('/api/auth/mock-login', (req, res) => {
+  const { provider, state } = req.query;
+  res.send(`
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Mock ${provider} Login</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #f4f5f7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+          }
+          .card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 360px;
+            width: 100%;
+          }
+          h2 { margin-bottom: 20px; color: #333; }
+          p { color: #666; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+          .btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 12px;
+            transition: background 0.2s;
+            text-decoration: none;
+            box-sizing: border-box;
+          }
+          .btn-primary {
+            background: ${provider === 'naver' ? '#03C75A' : '#FEE500'};
+            color: ${provider === 'naver' ? 'white' : '#191919'};
+          }
+          .btn-primary:hover {
+            background: ${provider === 'naver' ? '#02b34f' : '#Fada0a'};
+          }
+          .btn-cancel {
+            background: #e1e3e6;
+            color: #4e5968;
+          }
+          .btn-cancel:hover {
+            background: #d3d6db;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>${provider === 'naver' ? '네이버' : '카카오'} Mock Login</h2>
+          <p>
+            현재 로컬 개발 환경에서 OAuth 인증 키가 설정되어 있지 않아 <b>임시 모드(Sandbox)</b>로 로그인합니다.<br/>
+            [로그인] 버튼을 누르면 가상의 사용자 정보로 로그인이 완료됩니다.
+          </p>
+          <a class="btn btn-primary" href="/auth/callback?code=mock_code_${provider}&state=${encodeURIComponent(state as string)}">
+            가상 사용자 정보로 로그인
+          </a>
+          <button class="btn btn-cancel" onclick="window.close()">취소</button>
+        </div>
+      </body>
+    </html>
+  `);
+});
+
+
 
 app.get('/auth/callback', async (req, res) => {
   await initDbPromise;
@@ -340,11 +453,13 @@ app.get('/auth/callback', async (req, res) => {
   const proto = req.headers['x-forwarded-proto'] || 'http';
 
   let redirectUri = '';
+  let provider = 'google';
   let targetOrigin = host ? `${proto}://${host}` : (process.env.APP_URL || `http://localhost:${PORT}`);
   try {
     if (state) {
       const decodedState = JSON.parse(Buffer.from(state as string, 'base64').toString());
       redirectUri = decodedState.redirectUri;
+      provider = decodedState.provider || 'google';
       if (redirectUri) {
         targetOrigin = new URL(redirectUri).origin;
       }
@@ -358,32 +473,128 @@ app.get('/auth/callback', async (req, res) => {
   }
 
   try {
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
-        code: code as string,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri
-      })
-    });
-
-    const tokenData = await tokenResponse.json();
-    if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
-
-    const userInfoData = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
-
-    const user = {
-      id: userInfoData.sub,
-      email: userInfoData.email,
-      name: userInfoData.name,
-      picture: userInfoData.picture
+    let user = {
+      id: '',
+      email: '',
+      name: '',
+      picture: ''
     };
 
+    if (code && (code as string).startsWith('mock_code_')) {
+      if (provider === 'naver') {
+        user = {
+          id: 'naver_mock_123',
+          email: 'naver_mock@naver.com',
+          name: '네이버 가상유저',
+          picture: 'https://ssl.pstatic.net/static/member/images/profile/info_profile_3.png'
+        };
+      } else if (provider === 'kakao') {
+        user = {
+          id: 'kakao_mock_123',
+          email: 'kakao_mock@kakao.com',
+          name: '카카오 가상유저',
+          picture: 'http://t1.kakaocdn.net/welcomespace/dummy/profile_image.png'
+        };
+      }
+    } else if (provider === 'google') {
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          code: code as string,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri
+        })
+      });
+
+      const tokenData = await tokenResponse.json();
+      if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
+
+      const userInfoData = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
+
+      user = {
+        id: userInfoData.sub,
+        email: userInfoData.email,
+        name: userInfoData.name,
+        picture: userInfoData.picture
+      };
+    } else if (provider === 'naver') {
+      const tokenResponse = await fetch('https://nid.naver.com/oauth2.0/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: NAVER_CLIENT_ID,
+          client_secret: NAVER_CLIENT_SECRET,
+          code: code as string,
+          state: state as string
+        })
+      });
+
+      const tokenData = await tokenResponse.json();
+      if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
+
+      const profileResponse = await fetch('https://openapi.naver.com/v1/nid/me', {
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`
+        }
+      });
+      const profileData = await profileResponse.json();
+      if (profileData.resultcode !== '00') throw new Error(profileData.message);
+
+      const info = profileData.response;
+      user = {
+        id: `naver_${info.id}`,
+        email: info.email,
+        name: info.name || info.nickname || info.email.split('@')[0],
+        picture: info.profile_image || ''
+      };
+    } else if (provider === 'kakao') {
+      const bodyParams: Record<string, string> = {
+        grant_type: 'authorization_code',
+        client_id: KAKAO_CLIENT_ID,
+        redirect_uri: redirectUri,
+        code: code as string
+      };
+      if (KAKAO_CLIENT_SECRET) {
+        bodyParams.client_secret = KAKAO_CLIENT_SECRET;
+      }
+      const tokenResponse = await fetch('https://kauth.kakao.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
+        body: new URLSearchParams(bodyParams)
+      });
+
+      const tokenData = await tokenResponse.json();
+      if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
+
+      const profileResponse = await fetch('https://kapi.kakao.com/v2/user/me', {
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`,
+          'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
+        }
+      });
+      const profileData = await profileResponse.json();
+      if (!profileData.id) throw new Error('Failed to fetch Kakao user profile');
+
+      const kakaoAccount = profileData.kakao_account || {};
+      const profile = kakaoAccount.profile || {};
+
+      user = {
+        id: `kakao_${profileData.id}`,
+        email: kakaoAccount.email || `kakao_${profileData.id}@kakao.com`,
+        name: profile.nickname || `Kakao User ${profileData.id}`,
+        picture: profile.profile_image_url || ''
+      };
+    }
+
     if (pool) {
-      const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [user.email]);
+      const { rows } = user.email 
+        ? await pool.query('SELECT * FROM users WHERE email = $1', [user.email])
+        : { rows: [] };
+
       if (rows.length > 0) {
         user.id = rows[0].id;
         await pool.query(`
@@ -402,7 +613,7 @@ app.get('/auth/callback', async (req, res) => {
         await pool.query(`
           INSERT INTO users (id, email, name, picture, is_email_verified, role) 
           VALUES ($1, $2, $3, $4, true, $5)
-        `, [user.id, user.email, user.name, user.picture, role]);
+        `, [user.id, user.email || null, user.name, user.picture, role]);
       }
     }
 

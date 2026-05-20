@@ -15,6 +15,8 @@ interface AuthContextType {
   loading: boolean;
   login: () => void;
   loginWithGoogle: () => Promise<string | null>;
+  loginWithNaver: () => Promise<string | null>;
+  loginWithKakao: () => Promise<string | null>;
   loginWithEmail: (email: string, password: string) => Promise<string | null>;
   registerWithEmail: (email: string, password: string, name: string) => Promise<string | null>;
   logout: () => void;
@@ -86,7 +88,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = '/auth';
   };
 
-  const loginWithGoogle = async (): Promise<string | null> => {
+  const loginWithProvider = async (provider: 'google' | 'naver' | 'kakao'): Promise<string | null> => {
+    const providerNames: Record<string, string> = {
+      google: '구글',
+      naver: '네이버',
+      kakao: '카카오'
+    };
+    const providerName = providerNames[provider] || provider;
+
     try {
       // 팝업 차단을 우회하기 위해 비동기 호출 전에 창을 먼저 엽니다.
       const w = 500;
@@ -95,14 +104,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const top = window.screen.height / 2 - h / 2;
       const popup = window.open('', 'oauth_popup', `width=${w},height=${h},top=${top},left=${left}`);
 
-      const res = await apiFetch(`/api/auth/url?origin=${encodeURIComponent(window.location.origin)}`);
+      const res = await apiFetch(`/api/auth/url?provider=${provider}&origin=${encodeURIComponent(window.location.origin)}`);
       const text = await res.text();
       
       if (!res.ok) {
         if (popup) popup.close();
         try {
           const data = JSON.parse(text);
-          return data.error || '로그인 설정이 완료되지 않았습니다.';
+          return data.error || `${providerName} 로그인 설정이 완료되지 않았습니다.`;
         } catch (e) {
           return '서버 에러가 발생했습니다. (500)';
         }
@@ -117,7 +126,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       
       if (!data.url) {
         if (popup) popup.close();
-        return '구글 로그인 URL을 생성할 수 없습니다.';
+        return `${providerName} 로그인 URL을 생성할 수 없습니다.`;
       }
       
       if (popup) {
@@ -128,10 +137,15 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       }
       return null;
     } catch (e) {
-      console.error('Error fetching OAuth URL:', e);
-      return '구글 로그인 초기화 중 네트워크 오류가 발생했습니다.';
+      console.error(`Error fetching OAuth URL for ${provider}:`, e);
+      return `${providerName} 로그인 초기화 중 네트워크 오류가 발생했습니다.`;
     }
   };
+
+  const loginWithGoogle = () => loginWithProvider('google');
+  const loginWithNaver = () => loginWithProvider('naver');
+  const loginWithKakao = () => loginWithProvider('kakao');
+
 
   const loginWithEmail = async (email: string, password: string): Promise<string | null> => {
     try {
@@ -192,7 +206,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithGoogle, loginWithEmail, registerWithEmail, logout, refreshUser: fetchUser }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithGoogle, loginWithNaver, loginWithKakao, loginWithEmail, registerWithEmail, logout, refreshUser: fetchUser }}>
       {children}
     </AuthContext.Provider>
   );
