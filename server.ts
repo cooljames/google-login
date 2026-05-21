@@ -6,7 +6,7 @@ import path from 'path';
 import fs from 'fs';
 
 import multer from 'multer';
-import { put } from '@vercel/blob';
+import { put, del as blobDel } from '@vercel/blob';
 import bcrypt from 'bcryptjs';
 import nodemailer from 'nodemailer';
 import pg from 'pg';
@@ -895,9 +895,21 @@ app.put('/api/posts/:id', requireAuth, safeUpload, async (req: any, res: any) =>
   let attachment_url = post.attachment_url;
 
   if (remove_attachment) {
+    // 기존 Blob 삭제
+    if (post.attachment_url) {
+      try {
+        await blobDel(post.attachment_url, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (e) { console.warn('Blob delete warning (remove):', e); }
+    }
     attachment_name = null;
     attachment_url = null;
   } else if (req.file) {
+    // 기존 Blob 삭제 후 새 파일 업로드
+    if (post.attachment_url) {
+      try {
+        await blobDel(post.attachment_url, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (e) { console.warn('Blob delete warning (replace):', e); }
+    }
     try {
       const decodedName = decodeFileName(req.file.originalname);
       const blob = await put(decodedName, req.file.buffer, {
@@ -940,6 +952,15 @@ app.delete('/api/posts/:id', requireAuth, async (req: any, res: any) => {
 
   if (post.author_id !== req.user.id && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  // Blob 첨부파일 삭제
+  if (post.attachment_url) {
+    try {
+      await blobDel(post.attachment_url, { token: process.env.BLOB_READ_WRITE_TOKEN });
+    } catch (e) {
+      console.warn('Blob delete warning (post):', e);
+    }
   }
 
   await pool.query('DELETE FROM posts WHERE id = $1', [id]);
@@ -987,7 +1008,20 @@ app.delete('/api/admin/posts/bulk', requireAuth, requireAdmin, async (req: any, 
 
     console.log(`Admin ${req.user.email} is bulk deleting post IDs: ${postIds.join(', ')}`);
 
-    // Delete posts from database
+    // 첨부파일 URL 수집 후 Blob 삭제
+    const { rows: postsToDelete } = await pool.query(
+      'SELECT attachment_url FROM posts WHERE id = ANY($1) AND attachment_url IS NOT NULL',
+      [postIds.map(Number)]
+    );
+    const blobUrls = postsToDelete.map(p => p.attachment_url).filter(Boolean);
+    if (blobUrls.length > 0) {
+      try {
+        await blobDel(blobUrls, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (e) {
+        console.warn('Blob bulk delete warning:', e);
+      }
+    }
+
     const result = await pool.query('DELETE FROM posts WHERE id = ANY($1)', [postIds.map(Number)]);
 
     console.log(`Successfully bulk deleted posts. Rows affected: ${result.rowCount}`);
@@ -1016,6 +1050,20 @@ app.delete('/api/admin/users/bulk', requireAuth, requireAdmin, async (req: any, 
 
     console.log(`Admin ${req.user.email} is bulk deleting user IDs: ${filteredIds.join(', ')}`);
 
+    // 사용자 게시글의 첨부파일 Blob 삭제
+    const { rows: userPosts } = await pool.query(
+      'SELECT attachment_url FROM posts WHERE author_id = ANY($1) AND attachment_url IS NOT NULL',
+      [filteredIds]
+    );
+    const blobUrls = userPosts.map(p => p.attachment_url).filter(Boolean);
+    if (blobUrls.length > 0) {
+      try {
+        await blobDel(blobUrls, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (e) {
+        console.warn('Blob delete warning (user bulk):', e);
+      }
+    }
+
     // 1. 사용자의 게시글 삭제
     await pool.query('DELETE FROM posts WHERE author_id = ANY($1)', [filteredIds]);
     // 2. 사용자 삭제
@@ -1042,6 +1090,20 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req: any, r
     if (!pool) throw new Error('Database pool not initialized');
 
     console.log(`Admin ${req.user.email} is deleting user ID: ${id}`);
+
+    // 사용자 게시글의 첨부파일 Blob 삭제
+    const { rows: userPosts } = await pool.query(
+      'SELECT attachment_url FROM posts WHERE author_id = $1 AND attachment_url IS NOT NULL',
+      [id]
+    );
+    const blobUrls = userPosts.map(p => p.attachment_url).filter(Boolean);
+    if (blobUrls.length > 0) {
+      try {
+        await blobDel(blobUrls, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (e) {
+        console.warn('Blob delete warning (user single):', e);
+      }
+    }
 
     // 1. 사용자의 게시글 삭제
     await pool.query('DELETE FROM posts WHERE author_id = $1', [id]);
